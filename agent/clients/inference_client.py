@@ -1,8 +1,21 @@
-import httpx
+import json
+from pathlib import Path
 from typing import Optional
 
+import httpx
 
-INFERENCE_URL = "http://10.58.114.70:11434/api/generate"
+
+CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.json"
+
+with open(CONFIG_PATH) as f:
+    CONFIG = json.load(f)
+
+INFERENCE_HOST = CONFIG["inference_host"]
+INFERENCE_PORT = CONFIG["ports"]["inference"]
+
+INFERENCE_URL = (
+    f"http://{INFERENCE_HOST}:{INFERENCE_PORT}/api/generate"
+)
 
 
 async def call_inference(
