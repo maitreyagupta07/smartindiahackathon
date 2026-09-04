@@ -30,7 +30,11 @@ def classify_task(prompt: str, file_mime_type: str | None) -> str:
         return "code-execution"
     if any(kw in lowered for kw in ("search", "find in docs", "sop", "manual")):
         return "doc-search"
-    if any(kw in lowered for kw in ("approval note", "generate a doc", "write a report", "docx", "pptx", "xlsx")):
+    if any(kw in lowered for kw in (
+        "approval note", "generate a doc", "write a report",
+        "docx", "pptx", "xlsx",
+        "excel", "spreadsheet", "powerpoint", "presentation",
+    )):
         return "document-generation"
 
     return "text-generation"

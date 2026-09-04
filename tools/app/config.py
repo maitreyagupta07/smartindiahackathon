@@ -53,5 +53,13 @@ def get_config() -> dict:
 
 CONFIG = get_config()
 TOOLS_PORT = int(CONFIG["tools_port"])
-FILES_DIR = Path(CONFIG["FILES_DIR"])
+
+# FILES_DIR from config.json is conventionally a repo-root-relative path
+# (e.g. "./shared_files"). Anchor it to REPO_ROOT rather than the process's
+# cwd — otherwise this service (documented to be launched from within
+# /tools) and Person B's backend (launched from within /backend) resolve
+# the *same* config value to two different physical directories, silently
+# breaking the /files/<name> URLs this service hands back (§2.7a).
+_raw_files_dir = Path(CONFIG["FILES_DIR"])
+FILES_DIR = _raw_files_dir if _raw_files_dir.is_absolute() else (REPO_ROOT / _raw_files_dir).resolve()
 FILES_DIR.mkdir(parents=True, exist_ok=True)

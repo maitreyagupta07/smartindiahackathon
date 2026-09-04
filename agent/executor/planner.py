@@ -128,6 +128,21 @@ def _build_code_result_prompt(original_prompt: str, tool_observation: dict) -> s
     stdout = tool_observation.get("stdout", "")
     stderr = tool_observation.get("stderr", "")
     exit_code = tool_observation.get("exit_code")
+
+    if exit_code != 0:
+        # The sandbox run failed (e.g. a syntax error because the prompt had
+        # no actual code for Person F to extract) — Qwen must report the
+        # failure honestly, never invent a plausible-looking "verified"
+        # answer on top of a run that didn't actually succeed.
+        return (
+            f"Code was executed to satisfy this request: \"{original_prompt}\"\n\n"
+            f"exit_code: {exit_code}\n"
+            f"stdout:\n{stdout}\n"
+            f"stderr:\n{stderr}\n\n"
+            f"The execution FAILED (non-zero exit code). Do NOT invent or guess a result. "
+            f"Tell the user the code execution failed and include the relevant error from stderr."
+        )
+
     return (
         f"The following code was executed to satisfy this request: \"{original_prompt}\"\n\n"
         f"exit_code: {exit_code}\n"
