@@ -6,21 +6,40 @@ once — this is what makes the loop genuinely agentic rather than a fixed
 pipeline: each call looks at the full state.step_records history so far
 (persistent observation state) and decides what happens next.
 
-Supported flows today (no tools yet — Person C not wired in):
-  1. text-generation / code-execution / document-generation / doc-search
-     (no image) -> single call_qwen step -> finalize
+Supported flows:
+  1. text-generation
+     -> call_qwen -> finalize
+
   2. vision, needs_reasoning == False (plain "what's in this image")
-     -> single call_moondream step -> finalize
+     -> call_moondream -> finalize
+
   3. vision, needs_reasoning == True (image + "explain/analyze/...")
      -> call_moondream (describe image)
         -> observe
         -> call_qwen (reason over Moondream's observation + original prompt)
         -> finalize
 
-Extension point for Person C's tools: NextStep.action == "call_tool" is a
-valid return value the loop already knows how to route (see loop.py), but
-this planner never emits it yet — wire it in here once Person C's three
-endpoints are ready, without touching loop.py's dispatch logic.
+  4. code-execution
+     -> call_tool(execute_code)
+        -> observe stdout/stderr/exit_code
+        -> call_qwen (explain/verify the result against the original ask)
+        -> finalize
+
+  5. doc-search
+     -> call_tool(search_docs)
+        -> observe matched passages
+        -> call_qwen (answer the original prompt grounded in those passages)
+        -> finalize
+
+  6. document-generation
+     -> call_tool(generate_file)
+        -> observe file_url/file_name
+        -> finalize   (no Qwen step — Person C's generator is the actual
+                        deliverable; Qwen must not merely describe the file)
+
+Tool dispatch uses Person C's existing endpoints exactly as contracted in
+§2.6, via clients/tools_client.py — no duplicate tool logic lives here,
+only the decision of WHEN to call which tool and what to pass it.
 """
 from dataclasses import dataclass
 from typing import Literal, Optional
@@ -29,6 +48,12 @@ from executor.state import TaskState
 from router.model_registry import TEXT_MODEL, VISION_MODEL
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
+ToolName = Literal["execute_code", "search_docs", "generate_file"]
+
+# A tool call is allowed at most this many total attempts (initial + retries)
+# before the planner gives up and finalizes with an error. Independent of,
+# and tighter than, state.max_steps — this bounds retries specifically.
+MAX_TOOL_ATTEMPTS = 2
 
 
 @dataclass
@@ -37,6 +62,53 @@ class NextStep:
     model: Optional[str] = None
     prompt: Optional[str] = None
     image_base64: Optional[str] = None
+    tool_name: Optional[ToolName] = None
+    tool_args: Optional[dict] = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers: building tool arguments / follow-up prompts from state
+# ---------------------------------------------------------------------------
+
+def _extract_code(prompt: str) -> str:
+    """
+    Pull code out of the prompt if it's fenced in a ``` code block; otherwise
+    fall back to treating the whole prompt as the code to run. This is a
+    deliberately simple heuristic — Person F does not yet generate code via
+    Qwen before executing it; that's a future refinement, not required by
+    the current contract scope.
+    """
+    if "```" in prompt:
+        parts = prompt.split("```")
+        if len(parts) >= 2:
+            block = parts[1]
+            # strip an optional leading language tag, e.g. ```python
+            first_line, _, rest = block.partition("\n")
+            if rest and first_line.strip().isalpha():
+                return rest.strip()
+            return block.strip()
+    return prompt.strip()
+
+
+def _detect_file_type(prompt: str) -> str:
+    lowered = prompt.lower()
+    if any(kw in lowered for kw in ("xlsx", "excel", "spreadsheet")):
+        return "xlsx"
+    if any(kw in lowered for kw in ("pptx", "powerpoint", "slide", "presentation")):
+        return "pptx"
+    return "docx"  # default per problem statement's approval-note use case
+
+
+def _build_generate_file_args(prompt: str) -> dict:
+    file_type = _detect_file_type(prompt)
+    title = prompt.strip().splitlines()[0][:80] or "Generated Document"
+    content = {
+        "title": title,
+        "sections": [
+            {"heading": "Details", "body": prompt.strip()},
+        ],
+    }
+    return {"file_type": file_type, "content": content}
 
 
 def _build_reasoning_prompt(original_prompt: str, moondream_observation: str) -> str:
@@ -51,6 +123,47 @@ def _build_reasoning_prompt(original_prompt: str, moondream_observation: str) ->
         f"\"{original_prompt}\""
     )
 
+
+def _build_code_result_prompt(original_prompt: str, tool_observation: dict) -> str:
+    stdout = tool_observation.get("stdout", "")
+    stderr = tool_observation.get("stderr", "")
+    exit_code = tool_observation.get("exit_code")
+    return (
+        f"The following code was executed to satisfy this request: \"{original_prompt}\"\n\n"
+        f"exit_code: {exit_code}\n"
+        f"stdout:\n{stdout}\n"
+        f"stderr:\n{stderr}\n\n"
+        f"Using this VERIFIED execution result (never re-derive the arithmetic yourself), "
+        f"write a short answer to the original request for the user."
+    )
+
+
+def _build_docsearch_prompt(original_prompt: str, tool_observation: dict) -> str:
+    results = tool_observation.get("results", [])
+    if not results:
+        passages = "(no matching passages found in the local document store)"
+    else:
+        passages = "\n\n".join(
+            f"[Source: {r.get('source', 'unknown')}] {r.get('text', '')}" for r in results
+        )
+    return (
+        f"Using ONLY the following passages retrieved from the local document store, "
+        f"answer this request: \"{original_prompt}\"\n\n"
+        f"---\n{passages}\n---\n\n"
+        f"If the passages don't contain enough information, say so explicitly rather than guessing."
+    )
+
+
+def _tool_attempt_count(state: TaskState, tool_name: str) -> int:
+    return sum(
+        1 for r in state.step_records
+        if r.action == "call_tool" and r.tool_name == tool_name
+    )
+
+
+# ---------------------------------------------------------------------------
+# Core planner
+# ---------------------------------------------------------------------------
 
 def decide_next_step(state: TaskState) -> NextStep:
     """
@@ -76,10 +189,31 @@ def decide_next_step(state: TaskState) -> NextStep:
                 image_base64=state.file_base64,
             )
 
-        # text-generation / code-execution / document-generation / doc-search
-        # all currently route to a single Qwen call — tool-calling variants
-        # (execute-code, search-docs, generate-file) are the extension point
-        # for Person C and are NOT implemented yet, per current scope.
+        if state.task_type == "code-execution":
+            print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(execute_code)")
+            return NextStep(
+                action="call_tool",
+                tool_name="execute_code",
+                tool_args={"code": _extract_code(state.prompt), "language": "python"},
+            )
+
+        if state.task_type == "doc-search":
+            print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(search_docs)")
+            return NextStep(
+                action="call_tool",
+                tool_name="search_docs",
+                tool_args={"query": state.prompt, "top_k": 3},
+            )
+
+        if state.task_type == "document-generation":
+            print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(generate_file)")
+            return NextStep(
+                action="call_tool",
+                tool_name="generate_file",
+                tool_args=_build_generate_file_args(state.prompt),
+            )
+
+        # text-generation (default) -> single Qwen call
         print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen (text entry point)")
         return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=state.prompt)
 
@@ -87,8 +221,26 @@ def decide_next_step(state: TaskState) -> NextStep:
     last = state.step_records[-1]
 
     if last.status == "error":
-        # Observed a failure — nothing left to retry against without tools,
-        # so finalize and let the loop surface the error.
+        # Tool calls get a bounded retry; model calls and repeated tool
+        # failures finalize with the error surfaced to the caller.
+        if last.action == "call_tool" and last.tool_name:
+            attempts = _tool_attempt_count(state, last.tool_name)
+            if attempts < MAX_TOOL_ATTEMPTS:
+                print(
+                    f"[PLANNER] task_id={state.task_id} tool '{last.tool_name}' failed "
+                    f"(attempt {attempts}/{MAX_TOOL_ATTEMPTS}) -> retrying same tool call"
+                )
+                return NextStep(
+                    action="call_tool",
+                    tool_name=last.tool_name,
+                    tool_args=_rebuild_tool_args(state, last),
+                )
+            print(
+                f"[PLANNER] task_id={state.task_id} tool '{last.tool_name}' failed "
+                f"{attempts}x -> giving up, finalize with error"
+            )
+            return NextStep(action="finalize")
+
         print(f"[PLANNER] task_id={state.task_id} last step errored -> finalize")
         return NextStep(action="finalize")
 
@@ -102,12 +254,47 @@ def decide_next_step(state: TaskState) -> NextStep:
         return NextStep(action="finalize")
 
     if last.action == "call_qwen":
-        # Whether this was the plain text entry point or the post-Moondream
-        # reasoning step, a completed Qwen call is currently a terminal step.
+        # Whether this was the plain text entry point or a post-tool /
+        # post-Moondream reasoning step, a completed Qwen call is terminal.
         print(f"[PLANNER] task_id={state.task_id} qwen observed -> finalize")
         return NextStep(action="finalize")
 
-    # Any other action (e.g. a future call_tool result) falls through to
-    # finalize for now — extend here once Person C's tools are wired in.
+    if last.action == "call_tool":
+        if last.tool_name == "execute_code":
+            reasoning_prompt = _build_code_result_prompt(state.prompt, last.observation or {})
+            print(f"[PLANNER] task_id={state.task_id} execute_code observed -> chaining to call_qwen")
+            return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
+
+        if last.tool_name == "search_docs":
+            reasoning_prompt = _build_docsearch_prompt(state.prompt, last.observation or {})
+            print(f"[PLANNER] task_id={state.task_id} search_docs observed -> chaining to call_qwen")
+            return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
+
+        if last.tool_name == "generate_file":
+            # File is the deliverable itself — do not let Qwen describe it,
+            # just finalize with the file result already in the observation.
+            print(f"[PLANNER] task_id={state.task_id} generate_file observed -> finalize (file is the result)")
+            return NextStep(action="finalize")
+
+        print(f"[PLANNER] task_id={state.task_id} unknown tool_name '{last.tool_name}' -> finalize")
+        return NextStep(action="finalize")
+
+    # Any other/unhandled action falls through to finalize defensively.
     print(f"[PLANNER] task_id={state.task_id} unhandled last action '{last.action}' -> finalize")
     return NextStep(action="finalize")
+
+
+def _rebuild_tool_args(state: TaskState, failed_step) -> dict:
+    """
+    Rebuilds the same tool call's args for a retry. Kept as a thin
+    re-derivation from state.prompt (not from failed_step) so a retry
+    doesn't blindly resend malformed args if the original computation
+    is cheap and deterministic to redo.
+    """
+    if failed_step.tool_name == "execute_code":
+        return {"code": _extract_code(state.prompt), "language": "python"}
+    if failed_step.tool_name == "search_docs":
+        return {"query": state.prompt, "top_k": 3}
+    if failed_step.tool_name == "generate_file":
+        return _build_generate_file_args(state.prompt)
+    return {}

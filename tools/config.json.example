@@ -1,0 +1,14 @@
+{
+  "ports": {
+    "backend": 8000,
+    "tools": 8001,
+    "agent": 8002,
+    "inference": 11434
+  },
+  "FILES_DIR": "./shared_files",
+  "models": {
+    "text_model": "qwen2.5:1.5b-instruct",
+    "vision_model": "moondream",
+    "lora_adapter": "TBD"
+  }
+}
