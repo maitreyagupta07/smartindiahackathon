@@ -21,6 +21,9 @@ class StepRecord:
     status: Literal["ok", "error"] = "ok"
     error: str | None = None
     tool_name: str | None = None    # "execute_code" | "search_docs" | "generate_file" (call_tool only)
+    tool_args: dict | None = None   # exact args passed to the tool (call_tool only) — lets a
+                                     # retry or later replan step reuse them verbatim instead of
+                                     # re-deriving (e.g. re-running content-prep) from scratch.
 
 
 @dataclass
@@ -45,6 +48,14 @@ class TaskState:
     finished: bool = False
     error: str | None = None
 
+    # File-generation-specific persistent state — set as the document-generation
+    # flow progresses so later steps (and the final response) can see what was
+    # verified/prepared without re-deriving it from step_records.
+    prepared_file_content: dict | None = None  # structured {"title","sections"} built for generate_file
+    file_type: str | None = None               # "docx" | "xlsx" | "pptx" once determined
+    file_url: str | None = None
+    file_name: str | None = None
+
     def add_step(
         self,
         action: str,
@@ -54,6 +65,7 @@ class TaskState:
         status: str = "ok",
         error: str | None = None,
         tool_name: str | None = None,
+        tool_args: dict | None = None,
     ) -> StepRecord:
         self.step_count += 1
         record = StepRecord(
@@ -65,6 +77,7 @@ class TaskState:
             status=status,
             error=error,
             tool_name=tool_name,
+            tool_args=tool_args,
         )
         self.step_records.append(record)
         if model_used:

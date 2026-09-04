@@ -7,6 +7,8 @@ qwen chaining steps) so no real Person C / Person A services are required —
 these validate the ORCHESTRATION logic: which tool gets called, in what
 order, with what args, and how tool failures are handled.
 """
+import json
+
 import pytest
 from unittest.mock import patch, AsyncMock
 
@@ -61,17 +63,29 @@ async def test_doc_search_flow_calls_tool_then_qwen():
 
 
 @pytest.mark.asyncio
-async def test_document_generation_flow_calls_tool_only_no_qwen():
+async def test_document_generation_flow_prepares_content_via_qwen_before_generate_file():
+    """
+    Person F must never hand Person C's generate_file the raw user prompt.
+    A content-preparation Qwen call comes first and produces structured
+    FileContent JSON, which is what actually gets passed to generate_file.
+    """
     req = ExecuteTaskRequest(
         task_id="c3",
         prompt="generate a docx approval note for vessel V-101 wall loss finding",
         file_base64=None,
         file_mime_type=None,
     )
+    prepared_content = {
+        "title": "Approval Note: Vessel V-101 Wall Loss Finding",
+        "sections": [
+            {"heading": "Finding", "body": "Wall loss identified on vessel V-101."},
+            {"heading": "Approval", "body": "Recommended for approval pending inspection."},
+        ],
+    }
     tool_result = {"file_url": "/files/abc123-approval-note.docx", "file_name": "abc123-approval-note.docx"}
 
     with patch("executor.loop.generate_file", new=AsyncMock(return_value=tool_result)) as mocked_tool, \
-         patch("executor.loop.call_inference", new=AsyncMock()) as mocked_infer:
+         patch("executor.loop.call_inference", new=AsyncMock(return_value=json.dumps(prepared_content))) as mocked_infer:
         resp = await run_agent_loop(req)
 
     assert resp.status == "completed"
@@ -79,10 +93,65 @@ async def test_document_generation_flow_calls_tool_only_no_qwen():
     assert resp.result.file_url == "/files/abc123-approval-note.docx"
     assert resp.result.file_name == "abc123-approval-note.docx"
     assert resp.result.text is None
+
+    # Qwen was used exactly once, for content-preparation, and never saw the
+    # internal filegen stage marker.
+    mocked_infer.assert_awaited_once()
+    sent_prompt = mocked_infer.call_args.kwargs.get("prompt") or mocked_infer.call_args.args[1]
+    assert "__FILEGEN_" not in sent_prompt
+
     mocked_tool.assert_awaited_once()
     assert mocked_tool.call_args.kwargs["file_type"] == "docx"
-    # Qwen must NOT be used to merely describe the file — no model call at all.
-    mocked_infer.assert_not_awaited()
+    # The raw user prompt must NOT be what lands in the file — the prepared
+    # structured content must be used instead.
+    assert mocked_tool.call_args.kwargs["content"] == prepared_content
+
+
+@pytest.mark.asyncio
+async def test_document_generation_flow_verifies_computation_before_content_prep():
+    """
+    Numerical/computational file requests must run execute_code first to get
+    verified data, THEN prepare structured content grounded in that data —
+    never trusting Qwen's own arithmetic or copying the prompt into the file.
+    """
+    req = ExecuteTaskRequest(
+        task_id="c6",
+        prompt="Generate an xlsx file with the first 3 Fibonacci numbers and their average",
+        file_base64=None,
+        file_mime_type=None,
+    )
+    generated_code = "import json\nprint(json.dumps({'fib': [0, 1, 1], 'average': 0.67}))"
+    exec_result = {"stdout": "{\"fib\": [0, 1, 1], \"average\": 0.67}\n", "stderr": "", "exit_code": 0}
+    prepared_content = {
+        "title": "First 3 Fibonacci Numbers",
+        "sections": [
+            {"heading": "Values", "body": "Index 0: 0\nIndex 1: 1\nIndex 2: 1"},
+            {"heading": "Summary", "body": "Average: 0.67"},
+        ],
+    }
+    file_result = {"file_url": "/files/fib.xlsx", "file_name": "fib.xlsx"}
+
+    with patch("executor.loop.execute_code", new=AsyncMock(return_value=exec_result)) as mocked_exec, \
+         patch("executor.loop.generate_file", new=AsyncMock(return_value=file_result)) as mocked_gen, \
+         patch(
+             "executor.loop.call_inference",
+             new=AsyncMock(side_effect=[generated_code, json.dumps(prepared_content)]),
+         ) as mocked_infer:
+        resp = await run_agent_loop(req)
+
+    assert resp.status == "completed"
+    assert resp.result.type == "file"
+    assert resp.result.file_url == "/files/fib.xlsx"
+
+    # Two Qwen calls: generate verification code, then prepare content.
+    assert mocked_infer.await_count == 2
+    # execute_code was called with the code Qwen generated, verifying the data.
+    mocked_exec.assert_awaited_once()
+    assert mocked_exec.call_args.kwargs["code"] == generated_code
+    # generate_file received the prepared structured content, not the prompt.
+    mocked_gen.assert_awaited_once()
+    assert mocked_gen.call_args.kwargs["content"] == prepared_content
+    assert mocked_gen.call_args.kwargs["file_type"] == "xlsx"
 
 
 @pytest.mark.asyncio

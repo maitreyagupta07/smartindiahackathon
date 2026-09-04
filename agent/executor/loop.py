@@ -21,10 +21,26 @@ protection so a planner bug can never hang a request indefinitely.
 """
 from router.router import route_task
 from executor.state import TaskState
-from executor.planner import decide_next_step, NextStep
+from executor.planner import (
+    decide_next_step,
+    NextStep,
+    FILEGEN_CODE_MARKER,
+    FILEGEN_CONTENT_MARKER,
+)
 from clients.inference_client import call_inference
 from clients.tools_client import execute_code, search_docs, generate_file
 from schemas.task import ExecuteTaskRequest, ExecuteTaskResponse, TaskResult
+
+_FILEGEN_MARKERS = (FILEGEN_CODE_MARKER, FILEGEN_CONTENT_MARKER)
+
+
+def _strip_filegen_marker(prompt: str) -> str:
+    """Marker prefixes are internal stage tags for the planner — Qwen itself
+    should never see them, only the actual prompt text that follows."""
+    for marker in _FILEGEN_MARKERS:
+        if prompt.startswith(marker):
+            return prompt[len(marker):]
+    return prompt
 
 
 async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
@@ -63,10 +79,17 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 break
 
             if next_step.action in ("call_qwen", "call_moondream"):
+                sent_prompt = _strip_filegen_marker(next_step.prompt or "")
+                if sent_prompt != next_step.prompt:
+                    print(
+                        f"[LOOP] task_id={state.task_id} filegen stage="
+                        f"{'code-gen' if next_step.prompt.startswith(FILEGEN_CODE_MARKER) else 'content-prep'} "
+                        f"-> call_qwen"
+                    )
                 try:
                     response_text = await call_inference(
                         model=next_step.model,
-                        prompt=next_step.prompt,
+                        prompt=sent_prompt,
                         image_base64=next_step.image_base64,
                     )
                     print(
@@ -113,7 +136,15 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                     continue
 
                 try:
-                    print(f"[LOOP] task_id={state.task_id} calling tool={next_step.tool_name} args={tool_args}")
+                    if next_step.tool_name == "generate_file":
+                        print(
+                            f"[LOOP] task_id={state.task_id} calling tool=generate_file "
+                            f"file_type={tool_args.get('file_type')} "
+                            f"content_title={tool_args.get('content', {}).get('title')!r} "
+                            f"(prepared content, not raw prompt)"
+                        )
+                    else:
+                        print(f"[LOOP] task_id={state.task_id} calling tool={next_step.tool_name} args={tool_args}")
                     tool_result = await tool_fn(**tool_args)
                     print(f"[LOOP] task_id={state.task_id} tool={next_step.tool_name} OBSERVATION={tool_result}")
                     state.add_step(
@@ -123,6 +154,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                         observation=tool_result,
                         status="ok",
                         tool_name=next_step.tool_name,
+                        tool_args=tool_args,
                     )
                     # A successful tool step clears any earlier transient
                     # error state (e.g. this was a retry that succeeded).
@@ -137,6 +169,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                         status="error",
                         error=str(tool_exc),
                         tool_name=next_step.tool_name,
+                        tool_args=tool_args,
                     )
                     state.error = str(tool_exc)
                     # Loop continues — planner decides retry vs finalize
