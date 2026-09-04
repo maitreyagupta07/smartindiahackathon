@@ -7,28 +7,36 @@ on every /execute-task call:
 
     route_task()                         # decide entry point + task_type
     loop:
-        decide_next_step(state)          # PLAN  (executor/planner.py)
-        dispatch action -> call model    # ACT   (clients/inference_client.py)
+        decide_next_step(state)          # PLAN    (executor/planner.py)
+        dispatch action -> model or tool # ACT     (clients/*.py)
         state.add_step(...)              # OBSERVE (persistent state)
         # loop repeats -> planner re-plans against the new observation
     build ExecuteTaskResponse            # exact §2.4 contract shape, unchanged
 
-Supports multi-model orchestration in a single task (Moondream -> Qwen),
-persistent step/observation history, and hard max-step protection so a
-planner bug can never hang a request indefinitely.
-
-Tool-calling (Person C) is NOT implemented yet — see the call_tool branch
-below for the clean extension point. Do not depend on Person C's service
-from this file until that contract is confirmed live.
+Supports multi-model orchestration (Moondream -> Qwen) AND tool
+orchestration (execute_code / search_docs / generate_file, all via Person
+C's existing endpoints through clients/tools_client.py — no duplicate tool
+logic lives here), persistent step/observation history, and hard max-step
+protection so a planner bug can never hang a request indefinitely.
 """
 from router.router import route_task
 from executor.state import TaskState
 from executor.planner import decide_next_step, NextStep
 from clients.inference_client import call_inference
+from clients.tools_client import execute_code, search_docs, generate_file
 from schemas.task import ExecuteTaskRequest, ExecuteTaskResponse, TaskResult
 
 
 async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
+    # Built fresh per call (not at module import time) so that patching
+    # execute_code/search_docs/generate_file at the module level — e.g. in
+    # tests via `patch("executor.loop.execute_code", ...)` — is honored.
+    tool_dispatch = {
+        "execute_code": execute_code,
+        "search_docs": search_docs,
+        "generate_file": generate_file,
+    }
+
     state = TaskState(
         task_id=req.task_id,
         prompt=req.prompt,
@@ -47,7 +55,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             next_step: NextStep = decide_next_step(state)
             print(
                 f"[LOOP] task_id={state.task_id} step={state.step_count + 1} "
-                f"planned_action={next_step.action} model={next_step.model}"
+                f"planned_action={next_step.action} model={next_step.model} tool={next_step.tool_name}"
             )
 
             if next_step.action == "finalize":
@@ -83,30 +91,56 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                         error=str(step_exc),
                     )
                     state.error = str(step_exc)
-                    # Let the loop run one more iteration so the planner
-                    # observes the error and finalizes cleanly (planner
-                    # already handles status == "error" -> finalize).
+                    # Loop continues one more iteration so the planner
+                    # observes the error and decides retry/finalize.
 
             elif next_step.action == "call_tool":
-                # --- Extension point for Person C's tools ---
-                # Not implemented in this phase. The planner never emits
-                # this action today (see executor/planner.py docstring),
-                # so this branch should be unreachable right now. Kept
-                # explicit (rather than omitted) so wiring in
-                # clients/tools_client.execute_code / search_docs /
-                # generate_file later is a two-file change (planner.py +
-                # this branch), not a redesign.
-                print(f"[LOOP] task_id={state.task_id} call_tool requested but NOT IMPLEMENTED — finalizing")
-                state.add_step(
-                    action="call_tool",
-                    model_used=None,
-                    prompt_used=next_step.prompt,
-                    observation=None,
-                    status="error",
-                    error="Tool calling not implemented yet (Person C not wired in).",
-                )
-                state.error = "Tool calling not implemented yet."
-                state.finished = True
+                tool_fn = tool_dispatch.get(next_step.tool_name)
+                tool_args = next_step.tool_args or {}
+
+                if tool_fn is None:
+                    print(f"[LOOP] task_id={state.task_id} UNKNOWN tool '{next_step.tool_name}'")
+                    state.add_step(
+                        action="call_tool",
+                        model_used=None,
+                        prompt_used=None,
+                        observation=None,
+                        status="error",
+                        error=f"Unknown tool requested: {next_step.tool_name!r}",
+                        tool_name=next_step.tool_name,
+                    )
+                    state.error = f"Unknown tool requested: {next_step.tool_name!r}"
+                    continue
+
+                try:
+                    print(f"[LOOP] task_id={state.task_id} calling tool={next_step.tool_name} args={tool_args}")
+                    tool_result = await tool_fn(**tool_args)
+                    print(f"[LOOP] task_id={state.task_id} tool={next_step.tool_name} OBSERVATION={tool_result}")
+                    state.add_step(
+                        action="call_tool",
+                        model_used=None,
+                        prompt_used=str(tool_args),
+                        observation=tool_result,
+                        status="ok",
+                        tool_name=next_step.tool_name,
+                    )
+                    # A successful tool step clears any earlier transient
+                    # error state (e.g. this was a retry that succeeded).
+                    state.error = None
+                except Exception as tool_exc:  # noqa: BLE001
+                    print(f"[LOOP] task_id={state.task_id} tool={next_step.tool_name} ERROR: {tool_exc}")
+                    state.add_step(
+                        action="call_tool",
+                        model_used=None,
+                        prompt_used=str(tool_args),
+                        observation=None,
+                        status="error",
+                        error=str(tool_exc),
+                        tool_name=next_step.tool_name,
+                    )
+                    state.error = str(tool_exc)
+                    # Loop continues — planner decides retry vs finalize
+                    # for tool failures (see planner.py MAX_TOOL_ATTEMPTS).
 
             else:
                 # Defensive — planner contract only returns the four known
@@ -116,7 +150,9 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 state.finished = True
 
         # --- Build final response, per exact §2.4 contract shape ---
-        if state.error:
+        last_step = state.step_records[-1] if state.step_records else None
+
+        if state.error and not (last_step and last_step.status == "ok"):
             print(f"[LOOP] task_id={state.task_id} END status=failed error={state.error!r}")
             return ExecuteTaskResponse(
                 status="failed",
@@ -124,6 +160,32 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 task_type=state.task_type,
                 result=TaskResult(type="text", text=None),
                 error=state.error,
+            )
+
+        # File-generation tasks finalize straight off generate_file's
+        # observation — the file itself is the deliverable, not model text.
+        if (
+            last_step
+            and last_step.action == "call_tool"
+            and last_step.tool_name == "generate_file"
+            and last_step.status == "ok"
+        ):
+            file_obs = last_step.observation or {}
+            print(
+                f"[LOOP] task_id={state.task_id} END status=completed "
+                f"result_type=file file_url={file_obs.get('file_url')}"
+            )
+            return ExecuteTaskResponse(
+                status="completed",
+                model_used=state.model_used,
+                task_type=state.task_type,
+                result=TaskResult(
+                    type="file",
+                    text=None,
+                    file_url=file_obs.get("file_url"),
+                    file_name=file_obs.get("file_name"),
+                ),
+                error=None,
             )
 
         final_text = state.last_observation or ""
@@ -135,7 +197,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             status="completed",
             model_used=state.model_used,
             task_type=state.task_type,
-            result=TaskResult(type="text", text=final_text),
+            result=TaskResult(type="text", text=str(final_text)),
             error=None,
         )
 

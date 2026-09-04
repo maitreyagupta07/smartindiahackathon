@@ -17,9 +17,10 @@ class StepRecord:
     action: str                     # "call_qwen" | "call_moondream" | "call_tool" | "finalize"
     model_used: str | None
     prompt_used: str | None
-    observation: Any                # raw output of this step (e.g. model response text)
+    observation: Any                # raw output of this step (model text, or tool result dict)
     status: Literal["ok", "error"] = "ok"
     error: str | None = None
+    tool_name: str | None = None    # "execute_code" | "search_docs" | "generate_file" (call_tool only)
 
 
 @dataclass
@@ -52,6 +53,7 @@ class TaskState:
         observation: Any,
         status: str = "ok",
         error: str | None = None,
+        tool_name: str | None = None,
     ) -> StepRecord:
         self.step_count += 1
         record = StepRecord(
@@ -62,6 +64,7 @@ class TaskState:
             observation=observation,
             status=status,
             error=error,
+            tool_name=tool_name,
         )
         self.step_records.append(record)
         if model_used:
@@ -69,7 +72,7 @@ class TaskState:
 
         print(
             f"[STATE] task_id={self.task_id} step={record.step_number} "
-            f"action={action} model={model_used} status={status}"
+            f"action={action} tool={tool_name} model={model_used} status={status}"
         )
         return record
 
