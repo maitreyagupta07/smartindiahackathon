@@ -1,0 +1,8 @@
+lora/lora-venv/
+lora/unsloth_compiled_cache/
+lora/lora-output/
+lora/*.gguf
+!lora/approval-note-lora.gguf
+lora/outputs/
+__pycache__/
+*.pyc
