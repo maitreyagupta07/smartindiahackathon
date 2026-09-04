@@ -6,7 +6,7 @@ If Person A changes a model name, only this file should need updating.
 
 TEXT_MODEL = "qwen2.5:1.5b-instruct"
 VISION_MODEL = "moondream"
-LORA_ADAPTER = None  # TBD once Person A trains and names it
+LORA_ADAPTER = "approval-note-lora"  # Person A's fine-tuned adapter for approval-note file generation
 
 TASK_TYPE_TO_MODEL = {
     "vision": VISION_MODEL,

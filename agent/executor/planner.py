@@ -63,7 +63,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 from executor.state import TaskState
-from router.model_registry import TEXT_MODEL, VISION_MODEL
+from router.model_registry import TEXT_MODEL, VISION_MODEL, LORA_ADAPTER
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
 ToolName = Literal["execute_code", "search_docs", "generate_file"]
@@ -144,6 +144,28 @@ def _build_generate_file_args(prompt: str) -> dict:
         ],
     }
     return {"file_type": file_type, "content": content}
+
+
+def _is_approval_note(prompt: str) -> bool:
+    """
+    True for the specific approval-note document-generation use case Person
+    A fine-tuned LORA_ADAPTER on — matches the same "approval note" keyword
+    the router's classifier uses to route into document-generation, so an
+    approval-note request always both routes here AND gets the adapter.
+    """
+    return "approval note" in prompt.lower() or "approval-note" in prompt.lower()
+
+
+def _filegen_model(prompt: str) -> str:
+    """
+    Approval-note requests use Person A's fine-tuned LORA_ADAPTER (trained
+    specifically on approval-note phrasing/structure) for every Qwen call in
+    the document-generation flow; everything else keeps using the base
+    TEXT_MODEL. Falls back to TEXT_MODEL if the adapter isn't configured yet.
+    """
+    if _is_approval_note(prompt) and LORA_ADAPTER:
+        return LORA_ADAPTER
+    return TEXT_MODEL
 
 
 def _needs_computation(prompt: str) -> bool:
@@ -353,20 +375,25 @@ def decide_next_step(state: TaskState) -> NextStep:
 
         if state.task_type == "document-generation":
             state.file_type = _detect_file_type(state.prompt)
+            filegen_model = _filegen_model(state.prompt)
             if _needs_computation(state.prompt):
                 print(
-                    f"[PLANNER] task_id={state.task_id} step0 -> call_qwen "
+                    f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={filegen_model} "
                     f"(filegen: generate verification code, computation detected in request)"
                 )
                 return NextStep(
                     action="call_qwen",
-                    model=TEXT_MODEL,
+                    model=filegen_model,
                     prompt=FILEGEN_CODE_MARKER + _build_filegen_code_prompt(state.prompt),
                 )
-            print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen (filegen: content-preparation stage)")
+            print(
+                f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={filegen_model} "
+                f"(filegen: content-preparation stage"
+                f"{', using approval-note LoRA adapter' if filegen_model == LORA_ADAPTER else ''})"
+            )
             return NextStep(
                 action="call_qwen",
-                model=TEXT_MODEL,
+                model=filegen_model,
                 prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, None),
             )
 
@@ -453,13 +480,16 @@ def decide_next_step(state: TaskState) -> NextStep:
         if last.tool_name == "execute_code":
             if state.task_type == "document-generation":
                 stdout = (last.observation or {}).get("stdout", "")
+                filegen_model = _filegen_model(state.prompt)
                 print(
                     f"[PLANNER] task_id={state.task_id} filegen verification code executed "
-                    f"-> chaining to call_qwen (content-prep stage, grounded in verified stdout)"
+                    f"-> chaining to call_qwen model={filegen_model} "
+                    f"(content-prep stage, grounded in verified stdout"
+                    f"{', using approval-note LoRA adapter' if filegen_model == LORA_ADAPTER else ''})"
                 )
                 return NextStep(
                     action="call_qwen",
-                    model=TEXT_MODEL,
+                    model=filegen_model,
                     prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, stdout),
                 )
             reasoning_prompt = _build_code_result_prompt(state.prompt, last.observation or {})

@@ -14,7 +14,7 @@ from unittest.mock import patch, AsyncMock
 
 from schemas.task import ExecuteTaskRequest
 from executor.loop import run_agent_loop
-from router.model_registry import TEXT_MODEL
+from router.model_registry import TEXT_MODEL, LORA_ADAPTER
 
 
 @pytest.mark.asyncio
@@ -152,6 +152,59 @@ async def test_document_generation_flow_verifies_computation_before_content_prep
     mocked_gen.assert_awaited_once()
     assert mocked_gen.call_args.kwargs["content"] == prepared_content
     assert mocked_gen.call_args.kwargs["file_type"] == "xlsx"
+
+
+@pytest.mark.asyncio
+async def test_approval_note_flow_uses_lora_adapter_for_content_prep():
+    """
+    Person A's fine-tuned approval-note-lora adapter must be used for the
+    content-preparation Qwen call whenever the request is an approval note —
+    not the base TEXT_MODEL, and not for other document-generation requests.
+    """
+    req = ExecuteTaskRequest(
+        task_id="c7",
+        prompt="Generate an approval note docx for vessel V-101 wall loss finding",
+        file_base64=None,
+        file_mime_type=None,
+    )
+    prepared_content = {
+        "title": "Approval Note: Vessel V-101",
+        "sections": [{"heading": "Finding", "body": "Wall loss identified on vessel V-101."}],
+    }
+    tool_result = {"file_url": "/files/approval.docx", "file_name": "approval.docx"}
+
+    with patch("executor.loop.generate_file", new=AsyncMock(return_value=tool_result)), \
+         patch("executor.loop.call_inference", new=AsyncMock(return_value=json.dumps(prepared_content))) as mocked_infer:
+        resp = await run_agent_loop(req)
+
+    assert resp.status == "completed"
+    assert resp.model_used == LORA_ADAPTER
+    mocked_infer.assert_awaited_once()
+    assert mocked_infer.call_args.kwargs["model"] == LORA_ADAPTER
+
+
+@pytest.mark.asyncio
+async def test_non_approval_note_filegen_does_not_use_lora_adapter():
+    req = ExecuteTaskRequest(
+        task_id="c8",
+        prompt="Generate a pptx presentation about quarterly sales trends",
+        file_base64=None,
+        file_mime_type=None,
+    )
+    prepared_content = {
+        "title": "Quarterly Sales Summary",
+        "sections": [{"heading": "Overview", "body": "Sales grew steadily this quarter."}],
+    }
+    tool_result = {"file_url": "/files/sales.pptx", "file_name": "sales.pptx"}
+
+    with patch("executor.loop.generate_file", new=AsyncMock(return_value=tool_result)), \
+         patch("executor.loop.call_inference", new=AsyncMock(return_value=json.dumps(prepared_content))) as mocked_infer:
+        resp = await run_agent_loop(req)
+
+    assert resp.status == "completed"
+    assert resp.model_used == TEXT_MODEL
+    mocked_infer.assert_awaited_once()
+    assert mocked_infer.call_args.kwargs["model"] == TEXT_MODEL
 
 
 @pytest.mark.asyncio
