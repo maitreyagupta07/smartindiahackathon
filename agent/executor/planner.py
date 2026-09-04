@@ -71,7 +71,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional
 
 from executor.state import TaskState
-from router.model_registry import TEXT_MODEL, VISION_MODEL, LORA_ADAPTER
+from router.model_registry import TEXT_MODEL, VISION_MODEL, LORA_ADAPTER, is_approval_note_request
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
 ToolName = Literal["execute_code", "search_docs", "generate_file"]
@@ -178,24 +178,30 @@ def _build_generate_file_args(prompt: str) -> dict:
     return {"file_type": file_type, "content": content}
 
 
-def _is_approval_note(prompt: str) -> bool:
-    """
-    True for the specific approval-note document-generation use case Person
-    A fine-tuned LORA_ADAPTER on — matches the same "approval note" keyword
-    the router's classifier uses to route into document-generation, so an
-    approval-note request always both routes here AND gets the adapter.
-    """
-    return "approval note" in prompt.lower() or "approval-note" in prompt.lower()
-
-
 def _filegen_model(prompt: str) -> str:
     """
-    Approval-note requests use Person A's fine-tuned LORA_ADAPTER (trained
-    specifically on approval-note phrasing/structure) for every Qwen call in
-    the document-generation flow; everything else keeps using the base
-    TEXT_MODEL. Falls back to TEXT_MODEL if the adapter isn't configured yet.
+    Approval-note-flavored requests use Person A's fine-tuned LORA_ADAPTER
+    (trained specifically on approval-note phrasing/structure) for every
+    Qwen call in the document-generation flow; everything else keeps using
+    the base TEXT_MODEL. Falls back to TEXT_MODEL if the adapter isn't
+    configured yet. Note: whether this request is a document-generation task
+    at all (i.e. whether a file actually gets produced) is decided
+    separately by the router's classifier — this only picks which model to
+    use once we're already in that flow.
     """
-    if _is_approval_note(prompt) and LORA_ADAPTER:
+    if is_approval_note_request(prompt) and LORA_ADAPTER:
+        return LORA_ADAPTER
+    return TEXT_MODEL
+
+
+def _text_model(prompt: str) -> str:
+    """
+    Same adapter choice as _filegen_model, but for the plain text-generation
+    entry point — an approval-note-style request that never mentioned a file
+    format (e.g. "make an approval note for the refinery") should still get
+    the LoRA adapter's writing style, it just won't produce a file.
+    """
+    if is_approval_note_request(prompt) and LORA_ADAPTER:
         return LORA_ADAPTER
     return TEXT_MODEL
 
@@ -482,8 +488,12 @@ def decide_next_step(state: TaskState) -> NextStep:
             )
 
         # text-generation (default) -> single Qwen call
-        print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen (text entry point)")
-        return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=state.prompt)
+        text_model = _text_model(state.prompt)
+        print(
+            f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={text_model} "
+            f"(text entry point{', using approval-note LoRA adapter' if text_model == LORA_ADAPTER else ''})"
+        )
+        return NextStep(action="call_qwen", model=text_model, prompt=state.prompt)
 
     # --- Step 1+: replan based on what happened last ---
     last = state.step_records[-1]

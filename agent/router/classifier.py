@@ -30,10 +30,18 @@ def classify_task(prompt: str, file_mime_type: str | None) -> str:
         return "code-execution"
     if any(kw in lowered for kw in ("search", "find in docs", "sop", "manual")):
         return "doc-search"
+    # Only an EXPLICIT file-format ask routes into document-generation (which
+    # always ends by writing an actual file via generate_file). Content-only
+    # requests like "make an approval note for the refinery" — with no file
+    # format mentioned — stay text-generation and just get a text answer;
+    # see model_registry.is_approval_note_request() for the separate decision
+    # of whether that text answer uses the LoRA adapter.
     if any(kw in lowered for kw in (
-        "approval note", "generate a doc", "write a report",
-        "docx", "pptx", "xlsx",
-        "excel", "spreadsheet", "powerpoint", "presentation",
+        "docx", "pptx", "xlsx", "excel", "spreadsheet", "powerpoint", "presentation",
+        "word doc", "word document", "word file",
+        "generate a doc", "generate a document", "generate a file",
+        "make a document", "make a file", "create a document", "create a file",
+        "as a document", "as a file",
     )):
         return "document-generation"
 
