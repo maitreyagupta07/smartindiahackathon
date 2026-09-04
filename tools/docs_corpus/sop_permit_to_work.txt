@@ -1,0 +1,34 @@
+STANDARD OPERATING PROCEDURE: Permit to Work (PTW) — General Plant Areas
+
+1. Purpose
+This SOP defines the mandatory steps for obtaining a Permit to Work (PTW)
+before any maintenance, hot work, confined space entry, or electrical
+isolation task is carried out within refinery process areas.
+
+2. Scope
+Applies to all employees, contractors, and third-party personnel performing
+work inside battery-limit process units, tank farms, and utility areas.
+
+3. Procedure
+3.1 The requesting engineer shall submit a PTW request at least 24 hours
+before planned work, specifying: work location, nature of work, isolation
+requirements, and estimated duration.
+3.2 The Area Shift In-Charge shall verify isolation of energy sources
+(electrical, mechanical, process) before countersigning the permit.
+3.3 For hot work (welding, grinding, cutting), a Fire Watch must be posted
+for the full duration of work plus 30 minutes after completion.
+3.4 For confined space entry, atmospheric testing (O2, LEL, H2S, CO) must be
+logged every 2 hours and the permit is void if any reading exceeds safe
+threshold values defined in Annexure A.
+3.5 On completion, the permit must be formally closed and signed off by both
+the requesting engineer and the Area Shift In-Charge before the area is
+handed back to operations.
+
+4. Responsibilities
+- Requesting Engineer: raises and closes the permit, ensures crew briefing.
+- Area Shift In-Charge: verifies isolations, authorizes work start.
+- Safety Officer: audits high-risk permits (hot work, confined space) daily.
+
+5. Records
+All PTW records must be retained for a minimum of 3 years and made available
+for internal and statutory audits on request.

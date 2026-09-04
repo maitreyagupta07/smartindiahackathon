@@ -1,0 +1,32 @@
+INSPECTION REPORTING MANUAL — Static Equipment (Vessels, Tanks, Piping)
+
+Section 1: Report Structure
+Every inspection report must contain the following sections in order:
+Equipment ID, Inspection Date, Inspector Name, Inspection Type (internal /
+external / thickness survey), Observations, Findings, Recommendations, and
+Next Inspection Due Date.
+
+Section 2: Thickness Survey Findings
+When a thickness survey shows wall loss exceeding 10% of nominal thickness
+since the last survey, the finding must be classified as "Priority 1" and
+escalated to the Static Equipment Engineer within 24 hours, regardless of
+whether the calculated remaining life still meets code minimums.
+
+Section 3: Corrosion Under Insulation (CUI)
+Insulated carbon steel piping and vessels operating between 10°C and 175°C
+are classified as CUI-susceptible per API 583 and must be included in the
+risk-based CUI inspection program, with insulation removed at a statistically
+representative sample of locations during each turnaround.
+
+Section 4: Approval Note Generation
+Findings classified as Priority 1 or Priority 2 require a formal Approval
+Note to be generated and routed to the Maintenance Planning group before any
+repair work order is raised. The Approval Note must reference the original
+inspection report number and summarize the finding, recommended action, and
+required approval level (Shift In-Charge for Priority 2, Unit Head for
+Priority 1).
+
+Section 5: Recordkeeping
+Digitized inspection reports, including scanned handwritten field notes,
+must be stored against the equipment's unique tag number in the plant asset
+register within 48 hours of report finalization.
