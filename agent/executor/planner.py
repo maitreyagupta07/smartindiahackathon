@@ -20,10 +20,19 @@ Supported flows:
         -> finalize
 
   4. code-execution
-     -> call_tool(execute_code)
-        -> observe stdout/stderr/exit_code
-        -> call_qwen (explain/verify the result against the original ask)
+     -> call_qwen (generate a self-contained Python script that actually
+                    solves the natural-language request — Person F never
+                    hands Person C's execute_code the raw user prompt)
+        -> observe generated code
+        -> call_tool(execute_code)  (Person C — runs the Qwen-generated code)
+           -> observe verified stdout/stderr/exit_code
+           -> call_qwen (explain/verify the result against the original ask,
+                          grounded in that verified output)
         -> finalize
+
+     If Qwen's code-generation response contains no syntactically valid
+     Python, Person F raises immediately rather than ever falling back to
+     executing the raw natural-language prompt as "code".
 
   5. doc-search
      -> call_tool(search_docs)
@@ -58,7 +67,6 @@ Tool dispatch uses Person C's existing endpoints exactly as contracted in
 only the decision of WHEN to call which tool and what to pass it.
 """
 import json
-import re
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -81,6 +89,17 @@ MAX_TOOL_ATTEMPTS = 2
 FILEGEN_CODE_MARKER = "__FILEGEN_CODE__"
 FILEGEN_CONTENT_MARKER = "__FILEGEN_CONTENT__"
 
+# The plain code-execution flow's codegen stage reuses FILEGEN_CODE_MARKER's
+# exact string value on purpose, rather than introducing a third marker:
+# executor/loop.py strips a marker prefix off a prompt before it ever
+# reaches Qwen by comparing against the literal FILEGEN_CODE_MARKER /
+# FILEGEN_CONTENT_MARKER values it imports by name, and this module cannot
+# teach it a new marker without editing loop.py. state.task_type — already
+# set before decide_next_step ever runs — is what actually disambiguates
+# "this is the code-execution codegen stage" from "this is the
+# document-generation codegen stage" at the two call sites that check it.
+CODEEXEC_CODE_MARKER = FILEGEN_CODE_MARKER
+
 # Heuristic keywords indicating the file-generation request needs real
 # computed/verified data rather than free-form prose — in which case F
 # should run execute_code first and ground the file content in its output.
@@ -89,6 +108,18 @@ _COMPUTE_KEYWORDS = (
     "total", "fibonacci", "prime", "factorial", "sequence", "statistics",
     "count", "sort", "series", "numeric", "numbers",
 )
+
+
+class CodeGenerationError(Exception):
+    """
+    Raised when Qwen's code-execution codegen stage does not return usable
+    Python. Deliberately left uncaught here — it propagates out of
+    decide_next_step to executor/loop.py's outer exception handler, which
+    turns any uncaught exception into a clean status="failed" response.
+    Neither retrying execute_code with the same unusable text nor silently
+    substituting the raw natural-language user prompt is an acceptable
+    fallback, so surfacing this as a hard failure is the correct behavior.
+    """
 
 
 @dataclass
@@ -107,11 +138,12 @@ class NextStep:
 
 def _extract_code(prompt: str) -> str:
     """
-    Pull code out of the prompt if it's fenced in a ``` code block; otherwise
-    fall back to treating the whole prompt as the code to run. This is a
-    deliberately simple heuristic — Person F does not yet generate code via
-    Qwen before executing it; that's a future refinement, not required by
-    the current contract scope.
+    Pull code out of `prompt` if it's fenced in a ``` code block; otherwise
+    fall back to treating the whole string as the code to run. Only ever
+    call this on a Qwen code-generation response, never on the raw
+    natural-language user prompt — Qwen's response is expected to actually
+    be Python; a natural-language user prompt is not, and running it through
+    the sandbox as-is produces a SyntaxError, not a useful result.
     """
     if "```" in prompt:
         parts = prompt.split("```")
@@ -196,6 +228,55 @@ def _build_filegen_code_prompt(original_prompt: str) -> str:
         "request asks for (e.g. all N values, not just a sample) plus any "
         "requested aggregates (sum, average, etc)."
     )
+
+
+def _build_codeexec_code_prompt(original_prompt: str) -> str:
+    """
+    Asks Qwen to produce a complete, directly-runnable Python program
+    (executed via Person C's execute_code tool) that solves an arbitrary
+    natural-language code-execution request. Deliberately generic — it names
+    no specific task, calculation, variable, library, or output shape, so
+    the exact same prompt template works for any request. The user's prompt
+    itself is natural language, not Python, and must never be sent to
+    execute_code directly.
+    """
+    return (
+        "You are a Python code generator. Given the user's request below, "
+        "write a complete Python program that actually performs the "
+        "requested computation or action — do not just describe, explain, "
+        "or outline how it could be done.\n\n"
+        f"User request: \"{original_prompt}\"\n\n"
+        "Requirements:\n"
+        "- Write the full program, not a fragment. Include every import it "
+        "needs, explicitly. Do not assume any module, variable, function, "
+        "file, or other state already exists — the program starts from a "
+        "completely fresh Python process with no memory of anything before it.\n"
+        "- Prefer the Python standard library. Only reach for a third-party "
+        "package if the request genuinely cannot be satisfied without one.\n"
+        "- The program must run to completion entirely on its own: no manual "
+        "edits, no placeholders/TODOs, and no interactive input.\n"
+        "- The program must print the result(s) of the computation/action to "
+        "stdout in a clear, readable form, so it can be explained afterward.\n"
+        "- Respond with ONLY the code, ideally inside a single ```python "
+        "code block, and nothing else — no explanation, commentary, or "
+        "pseudocode before or after it."
+    )
+
+
+def _is_usable_python(code: str) -> bool:
+    """
+    Best-effort check that a Qwen code-generation response actually is
+    Python source — not empty, not a refusal, not stray prose — before it is
+    ever handed to Person C's execute_code sandbox. Uses compile() purely to
+    validate syntax; never executes/evals the untrusted text.
+    """
+    if not code or not code.strip():
+        return False
+    try:
+        compile(code, "<qwen-generated>", "exec")
+        return True
+    except SyntaxError:
+        return False
 
 
 def _build_filegen_content_prompt(original_prompt: str, verified_data: Optional[str]) -> str:
@@ -358,11 +439,14 @@ def decide_next_step(state: TaskState) -> NextStep:
             )
 
         if state.task_type == "code-execution":
-            print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(execute_code)")
+            print(
+                f"[PLANNER] task_id={state.task_id} step0 -> call_qwen "
+                f"(codeexec: generate Python code before execution — never the raw prompt)"
+            )
             return NextStep(
-                action="call_tool",
-                tool_name="execute_code",
-                tool_args={"code": _extract_code(state.prompt), "language": "python"},
+                action="call_qwen",
+                model=TEXT_MODEL,
+                prompt=CODEEXEC_CODE_MARKER + _build_codeexec_code_prompt(state.prompt),
             )
 
         if state.task_type == "doc-search":
@@ -438,6 +522,26 @@ def decide_next_step(state: TaskState) -> NextStep:
         return NextStep(action="finalize")
 
     if last.action == "call_qwen":
+        if state.task_type == "code-execution" and (last.prompt_used or "").startswith(CODEEXEC_CODE_MARKER):
+            code = _extract_code(str(last.observation))
+            if not _is_usable_python(code):
+                print(
+                    f"[PLANNER] task_id={state.task_id} codeexec code-generation produced no "
+                    f"usable Python -> raising (never falling back to the raw user prompt)"
+                )
+                raise CodeGenerationError(
+                    "Qwen did not return a usable Python script for this code-execution request."
+                )
+            print(
+                f"[PLANNER] task_id={state.task_id} codeexec code generated "
+                f"-> call_tool(execute_code) to run the Qwen-generated code"
+            )
+            return NextStep(
+                action="call_tool",
+                tool_name="execute_code",
+                tool_args={"code": code, "language": "python"},
+            )
+
         if state.task_type == "document-generation" and (last.prompt_used or "").startswith(FILEGEN_CODE_MARKER):
             code = _extract_code(str(last.observation))
             print(
