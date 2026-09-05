@@ -26,6 +26,7 @@ from executor.planner import (
     NextStep,
     FILEGEN_CODE_MARKER,
     FILEGEN_CONTENT_MARKER,
+    strip_markdown_emphasis,
 )
 from clients.inference_client import call_inference
 from clients.tools_client import execute_code, search_docs, generate_file
@@ -91,6 +92,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                         model=next_step.model,
                         prompt=sent_prompt,
                         image_base64=next_step.image_base64,
+                        temperature=next_step.temperature,
                     )
                     print(
                         f"[LOOP] task_id={state.task_id} model={next_step.model} "
@@ -221,7 +223,11 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 error=None,
             )
 
-        final_text = state.last_observation or ""
+        # The LoRA adapter sometimes writes markdown-style **bold** into its
+        # output, but nothing renders markdown here — strip it so the plain
+        # text answer doesn't show literal asterisks (see
+        # planner.strip_markdown_emphasis; the docx path strips it too).
+        final_text = strip_markdown_emphasis(state.last_observation or "")
         print(
             f"[LOOP] task_id={state.task_id} END status=completed "
             f"final_model={state.model_used} steps_run={state.step_count}"

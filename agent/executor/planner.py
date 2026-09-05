@@ -67,6 +67,7 @@ Tool dispatch uses Person C's existing endpoints exactly as contracted in
 only the decision of WHEN to call which tool and what to pass it.
 """
 import json
+import re
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -82,6 +83,15 @@ ToolName = Literal["execute_code", "search_docs", "generate_file"]
 # before the planner gives up and finalizes with an error. Independent of,
 # and tighter than, state.max_steps — this bounds retries specifically.
 MAX_TOOL_ATTEMPTS = 2
+
+# The approval-note LoRA adapter is a small, quantized model — at Ollama's
+# default sampling temperature it occasionally goes fully off-script (e.g.
+# a flat "I'm sorry, but I can't assist with that." on an entirely benign
+# request, observed in testing). Approval notes need to be standardized/
+# reliable output, not creative writing, so every LORA_ADAPTER call is
+# dispatched at a lower, steadier temperature. Left as None (Ollama's
+# default) for every other model — this is scoped to the adapter only.
+LORA_TEMPERATURE = 0.2
 
 # Internal stage markers prefixed onto call_qwen prompts during the
 # document-generation flow so decide_next_step can tell, purely from
@@ -133,6 +143,7 @@ class NextStep:
     image_base64: Optional[str] = None
     tool_name: Optional[ToolName] = None
     tool_args: Optional[dict] = None
+    temperature: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +401,22 @@ def _strip_file_format_phrase(prompt: str) -> str:
     return trimmed or prompt
 
 
+def strip_markdown_emphasis(text: str) -> str:
+    """
+    The approval-note LoRA adapter sometimes writes markdown-style emphasis
+    (**bold**, __bold__) into its output, but nothing downstream renders
+    markdown — not the plain-text API response, and not the docx writer,
+    which just writes characters literally. Left alone, that means literal
+    asterisks show up in both the text answer and the Word document (visible
+    as "**Date:**" instead of an actually bold "Date:"). Strip it here, in
+    code, right after the model call, rather than asking the model not to
+    use markdown (an instruction a small model won't reliably follow).
+    """
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    return text.replace("**", "").replace("__", "")
+
+
 def _approval_note_text_to_file_content(raw_text: str) -> dict:
     """
     Converts the LoRA adapter's own trained free-text approval-note format
@@ -403,6 +430,7 @@ def _approval_note_text_to_file_content(raw_text: str) -> dict:
     (Subject / Date / Findings / Recommendation / Approval Status /
     Signature, etc.) as the plain-text answer for the same kind of request.
     """
+    raw_text = strip_markdown_emphasis(raw_text)
     blocks = [b.strip() for b in raw_text.strip().split("\n\n") if b.strip()]
     if not blocks:
         return {"title": "Approval Note", "sections": [{"heading": "", "body": raw_text.strip()}]}
@@ -580,6 +608,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                     action="call_qwen",
                     model=LORA_ADAPTER,
                     prompt=FILEGEN_CONTENT_MARKER + _build_lora_prompt(state, core_prompt),
+                    temperature=LORA_TEMPERATURE,
                 )
             print(
                 f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={filegen_model} "
@@ -605,7 +634,12 @@ def decide_next_step(state: TaskState) -> NextStep:
                 f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={LORA_ADAPTER} "
                 f"(text entry point: approval-note LoRA adapter, called in its trained format)"
             )
-            return NextStep(action="call_qwen", model=LORA_ADAPTER, prompt=_build_lora_prompt(state, state.prompt))
+            return NextStep(
+                action="call_qwen",
+                model=LORA_ADAPTER,
+                prompt=_build_lora_prompt(state, state.prompt),
+                temperature=LORA_TEMPERATURE,
+            )
 
         print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={TEXT_MODEL} (text entry point)")
         return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=state.prompt)
