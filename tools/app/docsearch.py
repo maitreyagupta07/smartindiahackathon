@@ -14,10 +14,18 @@ from pathlib import Path
 from typing import Optional
 
 import chromadb
+from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
 from docx import Document as DocxDocument
 from docx.opc.exceptions import PackageNotFoundError
 
 from .config import REPO_ROOT, FILES_DIR
+
+# Force the CPU execution provider for the local embedding model. Chroma's
+# default provider selection tries CoreML first on Apple Silicon, which
+# fails hard (onnxruntime CoreML execution provider error) in some sandboxed/
+# restricted macOS environments — an environment-compatibility fix, not a
+# contract change (the search-docs request/response shape is untouched).
+_EMBEDDING_FUNCTION = ONNXMiniLM_L6_V2(preferred_providers=["CPUExecutionProvider"])
 
 CORPUS_DIR = REPO_ROOT / "tools" / "docs_corpus"
 CHROMA_DIR = REPO_ROOT / "tools" / "chroma_db"
@@ -222,7 +230,7 @@ def get_collection():
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         print(f"[docsearch] opening persistent Chroma index at: {CHROMA_DIR.resolve()}")
         _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        _collection = _client.get_or_create_collection(name=COLLECTION_NAME)
+        _collection = _client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=_EMBEDDING_FUNCTION)
         print(f"[docsearch] collection {COLLECTION_NAME!r} loaded, "
               f"{_collection.count()} chunk(s) already persisted on disk")
 
