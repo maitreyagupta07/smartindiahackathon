@@ -380,25 +380,51 @@ def _build_lora_prompt(state: TaskState, base_prompt: str) -> str:
     return f"{base_prompt}\n\nInspection report content:\n{extracted}"
 
 
+_FILE_FORMAT_TRAILING_FILLER_RE = re.compile(r"^\s*(of|for|about|as a|as an|in)\b", re.IGNORECASE)
+_FILE_FORMAT_LEADING_FILLER_RE = re.compile(r"\b(as a|as an|in)\s*$", re.IGNORECASE)
+
+
 def _strip_file_format_phrase(prompt: str) -> str:
     """
-    Trims a trailing file-format ask (e.g. ", save it as a word document")
-    off the user's prompt before it reaches the approval-note LoRA adapter.
-    The adapter was trained only on plain finding-description phrasing
-    (never asked to "save as a document"), so document-generation and
-    text-generation requests for the same underlying request must reach it
-    with the same core wording — otherwise the unfamiliar file-format
-    phrasing drifts it into conversational preamble/postamble instead of
-    its trained approval-note format.
+    Removes a file-format ask (e.g. "save it as a word document", or
+    "word doc" sitting at the FRONT of the sentence — e.g. "make a word doc
+    of approval note of leak in vessel B2") from the user's prompt before it
+    reaches the approval-note LoRA adapter. The adapter was trained only on
+    plain finding-description phrasing (never asked to "save as a
+    document"), so document-generation and text-generation requests for the
+    same underlying request must reach it with the same core wording —
+    otherwise the unfamiliar file-format phrasing drifts it into
+    conversational preamble/postamble instead of its trained format.
+
+    Earlier versions of this function found the FIRST matching keyword and
+    cut everything from there to the end of the string — correct only when
+    the file-format phrase trails the sentence ("...as a word document").
+    When it sits at the front or middle instead, that truncated away the
+    actual content along with it. This version removes only the matched
+    phrase itself (plus one leftover connecting word right after it, e.g.
+    "of"/"for"), wherever in the sentence it sits, leaving the rest intact.
     """
     lowered = prompt.lower()
-    cut = len(prompt)
-    for kw in FILE_FORMAT_KEYWORDS:
+    # Longest-first: FILE_FORMAT_KEYWORDS has overlapping entries (e.g.
+    # "word doc" is a literal substring of "word document") — matching the
+    # shortest one first would chop only part of the actual phrase and
+    # leave a stray fragment ("...as a ument") behind.
+    for kw in sorted(FILE_FORMAT_KEYWORDS, key=len, reverse=True):
         idx = lowered.find(kw)
-        if idx != -1:
-            cut = min(cut, idx)
-    trimmed = prompt[:cut].rstrip(" ,.-—")
-    return trimmed or prompt
+        if idx == -1:
+            continue
+        before = prompt[:idx]
+        after = prompt[idx + len(kw):]
+        # Drop one leftover connector immediately after the phrase (e.g.
+        # "word doc OF approval note...") and immediately before it (e.g.
+        # "save it AS A word document") — whichever side it fell on.
+        after = _FILE_FORMAT_TRAILING_FILLER_RE.sub("", after, count=1).lstrip()
+        before = _FILE_FORMAT_LEADING_FILLER_RE.sub("", before).rstrip(" ,.-—")
+        # Keep sentence-ending punctuation attached without an extra space.
+        joiner = "" if (after and after[0] in ",.!?") else (" " if after else "")
+        result = (before + joiner + after).strip(" ,")
+        return result or prompt
+    return prompt
 
 
 def strip_markdown_emphasis(text: str) -> str:

@@ -22,7 +22,12 @@ def test_needs_reasoning_false_without_image():
 
 
 def test_classify_code_execution():
-    assert classify_task("please calculate the flow rate", None) == "code-execution"
+    # A concrete arithmetic expression, not just the word "calculate", is
+    # what actually warrants code-execution — see test_classifier_signals.py
+    # for the full multi-signal test matrix (including why bare "calculate"
+    # on its own, e.g. "please calculate the flow rate", now correctly
+    # stays text-generation instead of forcing code-execution).
+    assert classify_task("calculate 12 * 7", None) == "code-execution"
 
 
 def test_classify_doc_search():

@@ -7,12 +7,63 @@ e.g. "text-generation", "vision", "code-execution",
 Also exposes needs_reasoning() — used by the planner to decide whether a
 vision task should chain into a second Qwen reasoning step, per the
 image + reasoning -> Moondream -> observation -> Qwen -> final pipeline.
+
+--- Multi-signal weighted classification (replaces plain substring matching) ---
+
+The previous version of this file decided task_type by checking whether ANY
+single keyword from a flat list appeared anywhere in the prompt. That is
+fast and deterministic (good) but brittle for real industrial phrasing:
+a single weak/ambiguous word (e.g. "calculate") could force a whole request
+down the wrong path ("calculate the flow rate" is a plain question, not a
+request to write and run code), and a file-format keyword sitting at the
+FRONT of a sentence ("word doc of approval note...") could confuse anything
+downstream that assumed it always trails the sentence.
+
+This version keeps the same deterministic, keyword-based, no-model-call
+approach (no Qwen/Ollama call is ever used just to classify — see
+_score_task_type below) but scores multiple signals with different weights
+instead of a single boolean "did any keyword match":
+
+  - Strong, specific PHRASES (e.g. "generate a word document", "search the
+    sop", "run this code") score much higher than a single generic word.
+  - Weak/ambiguous single words (e.g. bare "calculate", bare "find") score
+    low on their own — not enough by themselves to cross the classification
+    threshold, but they still add up if several appear together, or combine
+    with a genuinely strong signal (e.g. an actual arithmetic expression).
+  - A task type must cross MIN_CONFIDENT_SCORE before it's accepted at all;
+    otherwise the request safely falls back to "text-generation" rather than
+    an aggressive guess from one weak keyword (ambiguity handling).
+  - When more than one task type crosses that threshold AND the prompt
+    contains a multi-step connector ("and then", "based on the findings",
+    "search ... and prepare ...", etc.), the result is flagged as a
+    multi-step request with an ordered `workflow` list — e.g. a request that
+    both searches documents AND asks for a generated file is not "just"
+    document-generation; it's doc-search feeding into document-generation.
+    classify_task() (the existing string-returning function every current
+    caller uses) still returns a single primary task_type unchanged in
+    shape/contract — no new task_type string is invented — but the richer
+    classify() function below exposes the full picture (scores, matched
+    signals, is_multi_step, workflow) for the planner or logs to use.
+
+Vision stays a fully deterministic, non-scored decision: an image
+file_mime_type is always vision, full stop — no amount of scoring can ever
+override an actual uploaded image, and no amount of prompt text can
+manufacture a vision classification without one.
 """
+import re
+from dataclasses import dataclass, field
+from typing import Optional
 
 IMAGE_MIME_PREFIXES = ("image/",)
 
-# Keywords that signal the user wants more than a raw image description —
-# they want analysis/reasoning ON TOP of what the image shows.
+# A task type needs at least this much combined signal weight to be accepted
+# at all. Below this, the signal is too weak/ambiguous to trust — see
+# ambiguity handling in the module docstring above.
+MIN_CONFIDENT_SCORE = 3
+
+# File-format keywords — still exported as-is, since executor/planner.py's
+# _strip_file_format_phrase() imports this exact name/shape and needs the
+# flat keyword list, not the weighted signal table below.
 FILE_FORMAT_KEYWORDS = (
     "docx", "pptx", "xlsx", "excel", "spreadsheet", "powerpoint", "presentation",
     "word doc", "word document", "word file",
@@ -29,25 +80,225 @@ REASONING_KEYWORDS = (
 )
 
 
-def classify_task(prompt: str, file_mime_type: str | None) -> str:
+# ---------------------------------------------------------------------------
+# Signal tables: (phrase, weight, group) per task type.
+#
+# Groups exist purely for explainability/logging (item 9) — they don't
+# change the score arithmetic, just label WHY a signal counts what it does
+# when printed for debugging. Weight tiers used throughout:
+#   5 = an unambiguous, explicit phrase naming exactly this task
+#   3-4 = a strong, fairly specific term/phrase
+#   1-2 = a weak or ambiguous word that means little on its own
+# ---------------------------------------------------------------------------
+
+CODE_EXECUTION_SIGNALS = (
+    ("run this code", 5, "contextual_phrase"),
+    ("execute this code", 5, "contextual_phrase"),
+    ("run this script", 5, "contextual_phrase"),
+    ("execute this script", 5, "contextual_phrase"),
+    ("run this python", 5, "contextual_phrase"),
+    ("write and run", 4, "contextual_phrase"),
+    ("run the following", 3, "contextual_phrase"),
+    ("write a program", 3, "contextual_phrase"),
+    ("write a script", 3, "contextual_phrase"),
+    ("execute", 3, "action_verb"),
+    ("python", 3, "tool_term"),
+    ("script", 2, "tool_term"),
+    ("program", 2, "tool_term"),
+    ("algorithm", 2, "tool_term"),
+    ("compute", 2, "action_verb"),
+    ("run", 1, "action_verb"),           # very ambiguous alone ("run a test")
+    ("calculate", 1, "weak_domain_verb"),  # ambiguous alone — see module docstring
+    ("computation", 1, "weak_domain_verb"),
+)
+
+DOC_SEARCH_SIGNALS = (
+    ("search the sop", 5, "contextual_phrase"),
+    ("search the manual", 5, "contextual_phrase"),
+    ("find in the manual", 5, "contextual_phrase"),
+    ("find the procedure", 5, "contextual_phrase"),
+    ("look up in the sop", 5, "contextual_phrase"),
+    ("find in docs", 4, "contextual_phrase"),
+    ("search for", 2, "action_verb"),
+    ("look up", 2, "action_verb"),
+    ("search", 2, "action_verb"),
+    ("find", 1, "action_verb"),          # weak alone ("find the leak" != doc-search)
+    ("sop", 3, "domain_term"),
+    ("manual", 2, "domain_term"),
+    ("procedure", 2, "domain_term"),
+    ("documentation", 2, "domain_term"),
+    ("knowledge base", 2, "domain_term"),
+    ("inspection report", 3, "domain_term"),
+    ("inspection reports", 3, "domain_term"),
+    ("inspection records", 2, "domain_term"),
+)
+
+DOCUMENT_GENERATION_SIGNALS = (
+    ("generate a word document", 6, "contextual_phrase"),
+    ("generate a docx", 6, "contextual_phrase"),
+    ("make a word doc", 6, "contextual_phrase"),
+    ("save it as a word document", 6, "contextual_phrase"),
+    ("save as a word document", 6, "contextual_phrase"),
+    ("create a presentation", 5, "contextual_phrase"),
+    ("generate an excel sheet", 5, "contextual_phrase"),
+    ("as a word document", 4, "output_term"),
+    ("in word", 3, "output_term"),         # "prepare ... in Word" — narrow, deliberately scoped
+    ("as a word", 3, "output_term"),
+    ("docx", 4, "file_term"),
+    ("pptx", 4, "file_term"),
+    ("xlsx", 4, "file_term"),
+    ("word document", 4, "file_term"),
+    ("word doc", 4, "file_term"),
+    ("word file", 4, "file_term"),
+    ("excel", 3, "file_term"),
+    ("spreadsheet", 3, "file_term"),
+    ("powerpoint", 3, "file_term"),
+    ("presentation", 3, "file_term"),
+    ("generate a document", 3, "action_object"),
+    ("generate a file", 3, "action_object"),
+    ("make a document", 3, "action_object"),
+    ("make a file", 3, "action_object"),
+    ("create a document", 3, "action_object"),
+    ("create a file", 3, "action_object"),
+    ("as a document", 2, "output_term"),
+    ("as a file", 2, "output_term"),
+    ("prepare", 1, "weak_action_verb"),     # ambiguous alone ("prepare the pump for...")
+    ("approval note", 1, "weak_domain_term"),  # ambiguous alone — see model_registry
+)
+
+# Multi-step connector phrases: signal that the prompt is describing a
+# sequence of actions rather than one flat request. Used only to decide
+# whether to flag is_multi_step / build an ordered workflow — never to
+# invent a task type on its own.
+MULTI_STEP_CONNECTORS = (
+    "and then", "then prepare", "then generate", "then create", "then make",
+    "after that", "based on the report", "based on the findings",
+    "using the information", "and prepare", "and generate", "and create",
+    "and make", "and summarize", "and summarise", "and write",
+)
+
+_ARITHMETIC_EXPRESSION_RE = re.compile(r"\d+\s*[\+\-\*/^]\s*\d+")
+_CODE_FENCE_RE = re.compile(r"```")
+
+
+def _compile_phrase(phrase: str) -> re.Pattern:
+    # \b...\b around the whole (possibly multi-word) phrase — this is what
+    # fixes the old substring-matching false positives, e.g. old bare "sop"
+    # matching inside "shop"/"stopped": \b anchors to real word boundaries.
+    return re.compile(r"\b" + re.escape(phrase) + r"\b", re.IGNORECASE)
+
+
+def _compiled(signals: tuple) -> tuple:
+    return tuple((phrase, weight, group, _compile_phrase(phrase)) for phrase, weight, group in signals)
+
+
+_COMPILED_SIGNALS = {
+    "code-execution": _compiled(CODE_EXECUTION_SIGNALS),
+    "doc-search": _compiled(DOC_SEARCH_SIGNALS),
+    "document-generation": _compiled(DOCUMENT_GENERATION_SIGNALS),
+}
+
+
+@dataclass
+class ClassificationResult:
+    """
+    Structured classification output — richer than the plain task_type
+    string every existing caller uses. Nothing here changes any external
+    contract (§2.4's response shape is untouched); this is purely internal,
+    for the planner and for logs/debugging (item 9 — explainability without
+    exposing chain-of-thought, since there isn't any: these are matched
+    keyword signals, not model reasoning).
+    """
+    task_type: str
+    confidence: float                      # winning task type's raw score (0 if fell back to default)
+    scores: dict = field(default_factory=dict)         # {task_type: score} for every candidate considered
+    matched_signals: dict = field(default_factory=dict)  # {task_type: [(phrase, weight, group), ...]}
+    is_multi_step: bool = False
+    workflow: Optional[list] = None        # ordered task_type sequence, e.g. ["doc-search", "document-generation"]
+
+
+def _score_task_type(lowered_prompt: str, task_type: str) -> tuple:
+    """Returns (score, [(phrase, weight, group, match_start_index), ...])."""
+    total = 0.0
+    matches = []
+    for phrase, weight, group, pattern in _COMPILED_SIGNALS[task_type]:
+        m = pattern.search(lowered_prompt)
+        if m:
+            total += weight
+            matches.append((phrase, weight, group, m.start()))
+    return total, matches
+
+
+def classify(prompt: str, file_mime_type: Optional[str]) -> ClassificationResult:
+    """
+    Full multi-signal classification. classify_task() below is a thin
+    backward-compatible wrapper around this for existing callers that just
+    want the task_type string.
+    """
+    # Vision stays fully deterministic — an actual uploaded image always
+    # wins, no scoring involved, and no prompt text alone can produce it.
     if file_mime_type and file_mime_type.startswith(IMAGE_MIME_PREFIXES):
-        return "vision"
+        return ClassificationResult(
+            task_type="vision", confidence=1.0,
+            scores={"vision": 1.0}, matched_signals={"vision": [("<image upload>", 1.0, "file_mime_type")]},
+        )
 
     lowered = prompt.lower()
-    if any(kw in lowered for kw in ("calculate", "compute", "run this code", "execute")):
-        return "code-execution"
-    if any(kw in lowered for kw in ("search", "find in docs", "sop", "manual")):
-        return "doc-search"
-    # Only an EXPLICIT file-format ask routes into document-generation (which
-    # always ends by writing an actual file via generate_file). Content-only
-    # requests like "make an approval note for the refinery" — with no file
-    # format mentioned — stay text-generation and just get a text answer;
-    # see model_registry.is_approval_note_request() for the separate decision
-    # of whether that text answer uses the LoRA adapter.
-    if any(kw in lowered for kw in FILE_FORMAT_KEYWORDS):
-        return "document-generation"
 
-    return "text-generation"
+    scores = {}
+    matches_by_type = {}
+    for task_type in ("code-execution", "doc-search", "document-generation"):
+        score, matches = _score_task_type(lowered, task_type)
+        scores[task_type] = score
+        matches_by_type[task_type] = matches
+
+    # Extra deterministic boosts that aren't simple phrase lookups:
+    if _ARITHMETIC_EXPRESSION_RE.search(prompt):
+        scores["code-execution"] += 3
+        matches_by_type["code-execution"].append(("<arithmetic expression>", 3, "numeric_evidence", 0))
+    if _CODE_FENCE_RE.search(prompt):
+        scores["code-execution"] += 5
+        matches_by_type["code-execution"].append(("<code fence>", 5, "numeric_evidence", 0))
+
+    qualifying = {t: s for t, s in scores.items() if s >= MIN_CONFIDENT_SCORE}
+
+    has_connector = any(c in lowered for c in MULTI_STEP_CONNECTORS)
+    is_multi_step = has_connector and len(qualifying) >= 2
+
+    if not qualifying:
+        # Ambiguity handling: no signal was strong enough to trust — never
+        # make an aggressive call off one weak keyword.
+        return ClassificationResult(
+            task_type="text-generation", confidence=0.0,
+            scores=scores, matched_signals=matches_by_type,
+        )
+
+    if is_multi_step:
+        # Deliverable-oriented tie-break: if document-generation is one of
+        # the qualifying types, it's the primary task_type — a request that
+        # both searches documents AND asks for a generated file ultimately
+        # produces a file, so document-generation is what the loop should
+        # enter (per contract, task_type stays one of the 5 existing
+        # strings — no new type invented). The full ordered workflow is
+        # still exposed for the planner to use (or not) later.
+        order = sorted(qualifying, key=lambda t: min(m[3] for m in matches_by_type[t]))
+        primary = "document-generation" if "document-generation" in qualifying else order[0]
+        return ClassificationResult(
+            task_type=primary, confidence=qualifying[primary],
+            scores=scores, matched_signals=matches_by_type,
+            is_multi_step=True, workflow=order,
+        )
+
+    primary = max(qualifying, key=qualifying.get)
+    return ClassificationResult(
+        task_type=primary, confidence=qualifying[primary],
+        scores=scores, matched_signals=matches_by_type,
+    )
+
+
+def classify_task(prompt: str, file_mime_type: str | None) -> str:
+    """Backward-compatible: every existing caller just wants the task_type string."""
+    return classify(prompt, file_mime_type).task_type
 
 
 def needs_reasoning(prompt: str, file_mime_type: str | None) -> bool:
