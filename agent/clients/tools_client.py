@@ -45,15 +45,22 @@ async def execute_code(code: str, language: str = "python") -> dict:
         return data
 
 
-async def search_docs(query: str, top_k: int = 3) -> dict:
+async def search_docs(query: str, top_k: int = 3, chat_id: str | None = None) -> dict:
     """
     Contract §2.6: POST /tools/search-docs
-    Returns: { "results": [ { "text": str, "source": str, "score": float } ] }
+    Returns: { "results": [ { "text": str, "source": str, "score": float,
+                              "page": int|None } ] }
+
+    `chat_id` (optional): when given, retrieval is restricted to that chat's
+    uploaded Knowledge Base only. Omitted -> unchanged corpus-wide search.
     """
     url = f"{_get_tools_base_url()}/tools/search-docs"
-    print(f"[TOOLS_CLIENT] -> search_docs url={url} query={query!r} top_k={top_k}")
+    payload: dict = {"query": query, "top_k": top_k}
+    if chat_id:
+        payload["chat_id"] = chat_id
+    print(f"[TOOLS_CLIENT] -> search_docs url={url} query={query!r} top_k={top_k} chat_id={chat_id!r}")
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(url, json={"query": query, "top_k": top_k})
+        resp = await client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()
         print(f"[TOOLS_CLIENT] <- search_docs result_count={len(data.get('results', []))}")

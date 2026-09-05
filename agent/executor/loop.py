@@ -59,12 +59,19 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
         prompt=req.prompt,
         file_base64=req.file_base64,
         file_mime_type=req.file_mime_type,
+        chat_id=getattr(req, "chat_id", None),
+        history=getattr(req, "history", None),
     )
 
-    print(f"[LOOP] task_id={req.task_id} START prompt={req.prompt!r} has_file={bool(req.file_base64)}")
+    print(
+        f"[LOOP] task_id={req.task_id} START prompt={req.prompt!r} "
+        f"has_file={bool(req.file_base64)} chat_id={getattr(req, 'chat_id', None)!r}"
+    )
 
     try:
-        task_type, first_model, needs_reasoning = await route_task(req.prompt, req.file_mime_type)
+        task_type, first_model, needs_reasoning = await route_task(
+            req.prompt, req.file_mime_type, getattr(req, "chat_id", None)
+        )
         state.task_type = task_type
         state.needs_reasoning = needs_reasoning
 
@@ -236,7 +243,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             status="completed",
             model_used=state.model_used,
             task_type=state.task_type,
-            result=TaskResult(type="text", text=str(final_text)),
+            result=TaskResult(type="text", text=str(final_text), sources=state.sources or None),
             error=None,
         )
 

@@ -196,23 +196,23 @@
         <!-- Knowledge Base -->
         <section id="tab-knowledge" style="flex-direction:column;gap:14px">
           <span class="section-label">Knowledge Base</span>
-          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:560px">The local document corpus Person C's <span class="mono">search-docs</span> tool searches against. Shown here as a reference shell — indexed document listing isn't yet exposed by the tools API.</p>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:600px">Documents users upload inside a chat are ingested into the vector store (chunked, embedded, tagged with that chat's ID) and listed here automatically. Each chat can only retrieve its own documents. To add a document, upload a PDF from within a chat — this view is for management and review.</p>
           <div class="panel">
             <div class="filter-row">
               <div class="filter-left">
-                <div class="search-input"><iconify-icon icon="lucide:search"></iconify-icon><input id="kb-search" type="text" placeholder="Search documents…"></div>
+                <div class="search-input"><iconify-icon icon="lucide:search"></iconify-icon><input id="kb-search" type="text" placeholder="Search by file or chat…"></div>
               </div>
-              <button class="export-btn" id="kb-add" disabled style="opacity:.5;cursor:not-allowed"><iconify-icon icon="lucide:upload"></iconify-icon>Add Document</button>
+              <button class="export-btn" id="kb-add" disabled style="opacity:.5;cursor:not-allowed" title="Upload a PDF from within a chat to add a document"><iconify-icon icon="lucide:upload"></iconify-icon>Added via chat</button>
             </div>
             <table>
               <thead>
-                <tr><th>Document</th><th>Source</th><th class="num">Chunks</th><th class="num">Last Indexed</th></tr>
+                <tr><th>Document</th><th>Type</th><th>Status</th><th>Chat</th><th class="num">Chunks</th><th class="num">Uploaded</th></tr>
               </thead>
               <tbody id="kb-tbody"></tbody>
             </table>
             <div class="table-empty" id="kb-empty" hidden>
               <iconify-icon icon="lucide:search-x"></iconify-icon>
-              <span>No documents match your search.</span>
+              <span>No documents yet — upload a PDF from a chat to populate the Knowledge Base.</span>
             </div>
           </div>
         </section>

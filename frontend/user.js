@@ -15,8 +15,42 @@ const PHASE_LABEL = {
 };
 
 let LIVE_BACKEND = false;
-let currentTask = null; // the task object driving the UI right now
+let currentTask = null; // the in-flight / most-recent assistant turn (drives live strip + graph)
 let pollHandle = null;
+
+/* ============================================================
+   Chat state — the active conversation. chat_id is generated
+   client-side (Store.newChatId), is the isolation key, and is
+   sent on every upload and every message. Switching chats
+   switches it; "New Chat" starts a fresh one.
+   ============================================================ */
+let currentChatId = null;
+let currentChatTitle = null;
+let chatMessages = []; // ordered turns: {role:'user'|'assistant'|'system', ...}
+
+function persistCurrentChat() {
+  if (!currentChatId) return;
+  Store.saveChatMessages(currentChatId, chatMessages);
+  Store.upsertChat({
+    chat_id: currentChatId,
+    title: currentChatTitle || firstPromptTitle() || 'New Chat',
+    updated_at: new Date().toISOString(),
+  });
+}
+
+function firstPromptTitle() {
+  const firstUser = chatMessages.find((m) => m.role === 'user' && m.prompt);
+  return firstUser ? truncate(firstUser.prompt, 40) : null;
+}
+
+function ensureChat() {
+  if (!currentChatId) {
+    currentChatId = Store.newChatId();
+    currentChatTitle = null;
+    chatMessages = [];
+  }
+  return currentChatId;
+}
 
 /* ============================================================
    State machine: turns raw backend fields into honest UI state
@@ -72,10 +106,10 @@ function routeLabelFor(branch) {
    View switching: idle (centered composer) vs active conversation
    ============================================================ */
 function updateViewMode() {
-  const hasTask = !!currentTask;
-  document.getElementById('idle-view').hidden = hasTask;
-  document.getElementById('conversation-scroll').hidden = !hasTask;
-  document.getElementById('composer-dock').hidden = !hasTask;
+  const active = chatMessages.length > 0;
+  document.getElementById('idle-view').hidden = active;
+  document.getElementById('conversation-scroll').hidden = !active;
+  document.getElementById('composer-dock').hidden = !active;
 }
 
 /* ============================================================
@@ -121,57 +155,104 @@ function renderLiveStrip(state) {
    ============================================================ */
 function renderConversation() {
   updateViewMode();
-  if (!currentTask) {
-    document.getElementById('topbar-task-title').textContent = 'Workspace';
-    document.getElementById('topbar-task-id').textContent = '';
+  const titleEl = document.getElementById('topbar-task-title');
+  const idEl = document.getElementById('topbar-task-id');
+
+  if (!chatMessages.length) {
+    titleEl.textContent = 'Workspace';
+    idEl.textContent = '';
     return;
   }
-  document.getElementById('topbar-task-title').textContent = truncate(currentTask.prompt, 60);
-  document.getElementById('topbar-task-id').textContent = `#${currentTask.task_id.slice(0, 8).toUpperCase()}`;
+  titleEl.textContent = currentChatTitle || firstPromptTitle() || 'Chat';
+  idEl.textContent = currentChatId ? `#${String(currentChatId).slice(0, 8).toUpperCase()}` : '';
 
   const inner = document.getElementById('conversation-inner');
-  const userMsg = `
-    <div class="msg-user">
-      <div class="bubble">${escapeHtml(currentTask.prompt)}</div>
-      ${currentTask.file_name ? `<div class="file-chip"><iconify-icon icon="${fileTypeIcon(currentTask.file_name)}"></iconify-icon>${escapeHtml(currentTask.file_name)}</div>` : ''}
-    </div>`;
+  inner.innerHTML = chatMessages.map(renderTurn).join('');
+  const scroller = document.getElementById('conversation-scroll');
+  if (scroller) scroller.scrollTop = scroller.scrollHeight;
+}
 
-  let aiMsg = '';
-  if (currentTask.status === 'failed') {
-    aiMsg = `<div class="msg-ai"><div class="error-banner"><iconify-icon icon="lucide:alert-triangle" style="font-size:16px;flex-shrink:0;margin-top:1px"></iconify-icon><div>${escapeHtml(currentTask.error || 'The task failed.')}</div></div>${taskMetaRow(currentTask)}</div>`;
-  } else if (currentTask.status === 'completed') {
-    const chip = currentTask.model_used
-      ? `<div class="model-chip"><iconify-icon icon="lucide:terminal" style="font-size:12px"></iconify-icon><span class="mono">${escapeHtml(currentTask.model_used)}</span></div>`
-      : '';
-    let body = '';
-    if (currentTask.result && currentTask.result.type === 'file') {
-      const fn = currentTask.result.file_name || 'deliverable';
-      const url = currentTask.result.file_url || '#';
-      body = `
-        <div class="deliverable-card">
-          <div class="left">
-            <div class="file-icon"><iconify-icon icon="${fileTypeIcon(fn)}"></iconify-icon></div>
-            <div style="min-width:0">
-              <div class="name mono">${escapeHtml(fn)}</div>
-              <div class="status-line"><span class="status-dot ok"></span>Ready</div>
-            </div>
-          </div>
-          <div class="actions">
-            <a class="btn-ghost" href="${url}" target="_blank" rel="noopener">Open</a>
-            <a class="btn-icon-accent" href="${url}" download><iconify-icon icon="lucide:download" style="font-size:16px"></iconify-icon></a>
-          </div>
-        </div>`;
-    } else if (currentTask.result && currentTask.result.text) {
-      body = `<p class="summary-text">${escapeHtml(currentTask.result.text)}</p>`;
-    } else {
-      body = `<p class="summary-text" style="color:var(--text-muted)">Task completed with no returned content.</p>`;
-    }
-    aiMsg = `<div class="msg-ai">${chip}${body}${taskMetaRow(currentTask)}</div>`;
-  } else {
-    aiMsg = `<div class="msg-ai"><p class="summary-text" style="color:var(--text-muted)">Working on it${LIVE_BACKEND ? '' : ' (demo simulation)'}…</p></div>`;
+function renderTurn(turn) {
+  if (turn.role === 'user') {
+    return `
+      <div class="msg-user">
+        <div class="bubble">${escapeHtml(turn.prompt || '')}</div>
+        ${turn.file_name ? `<div class="file-chip"><iconify-icon icon="${fileTypeIcon(turn.file_name)}"></iconify-icon>${escapeHtml(turn.file_name)}</div>` : ''}
+      </div>`;
   }
 
-  inner.innerHTML = userMsg + aiMsg;
+  if (turn.role === 'system') {
+    if (turn.kind === 'upload') {
+      return `
+        <div class="msg-system">
+          <div class="kb-upload-chip">
+            <iconify-icon icon="lucide:file-text"></iconify-icon>
+            <div class="kb-upload-body">
+              <div class="kb-upload-name mono">${escapeHtml(turn.filename || 'document.pdf')}</div>
+              <div class="kb-upload-status"><span class="status-dot ok"></span>Added to Knowledge Base ✓${turn.chunks ? ` · ${turn.chunks} chunk${turn.chunks === 1 ? '' : 's'}` : ''}</div>
+            </div>
+          </div>
+        </div>`;
+    }
+    // upload error
+    return `
+      <div class="msg-system">
+        <div class="kb-upload-chip error">
+          <iconify-icon icon="lucide:alert-triangle"></iconify-icon>
+          <div class="kb-upload-body">
+            <div class="kb-upload-name mono">${escapeHtml(turn.filename || 'upload')}</div>
+            <div class="kb-upload-status err">${escapeHtml(turn.message || 'Upload failed.')}</div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // assistant turn
+  if (turn.status === 'failed') {
+    return `<div class="msg-ai"><div class="error-banner"><iconify-icon icon="lucide:alert-triangle" style="font-size:16px;flex-shrink:0;margin-top:1px"></iconify-icon><div>${escapeHtml(turn.error || 'The request failed.')}</div></div>${turn.task_id ? taskMetaRow(turn) : ''}</div>`;
+  }
+  if (turn.status !== 'completed') {
+    return `<div class="msg-ai"><p class="summary-text" style="color:var(--text-muted)">Working on it${LIVE_BACKEND ? '' : ' (demo simulation)'}…</p></div>`;
+  }
+
+  const chip = turn.model_used
+    ? `<div class="model-chip"><iconify-icon icon="lucide:terminal" style="font-size:12px"></iconify-icon><span class="mono">${escapeHtml(turn.model_used)}</span></div>`
+    : '';
+  const result = turn.result || {};
+  let body = '';
+  if (result.type === 'file') {
+    const fn = result.file_name || 'deliverable';
+    const url = result.file_url || '#';
+    body = `
+      <div class="deliverable-card">
+        <div class="left">
+          <div class="file-icon"><iconify-icon icon="${fileTypeIcon(fn)}"></iconify-icon></div>
+          <div style="min-width:0">
+            <div class="name mono">${escapeHtml(fn)}</div>
+            <div class="status-line"><span class="status-dot ok"></span>Ready</div>
+          </div>
+        </div>
+        <div class="actions">
+          <a class="btn-ghost" href="${url}" target="_blank" rel="noopener">Open</a>
+          <a class="btn-icon-accent" href="${url}" download><iconify-icon icon="lucide:download" style="font-size:16px"></iconify-icon></a>
+        </div>
+      </div>`;
+  } else if (result.text) {
+    body = `<p class="summary-text">${escapeHtml(result.text)}</p>${renderSources(result.sources)}`;
+  } else {
+    body = `<p class="summary-text" style="color:var(--text-muted)">Completed with no returned content.</p>`;
+  }
+  return `<div class="msg-ai">${chip}${body}${turn.task_id ? taskMetaRow(turn) : ''}</div>`;
+}
+
+function renderSources(sources) {
+  if (!Array.isArray(sources) || !sources.length) return '';
+  const items = sources.map((s) => {
+    const name = s.filename || 'document';
+    const page = (s.page !== null && s.page !== undefined) ? `, page ${s.page}` : '';
+    return `<li><iconify-icon icon="lucide:file-text" style="font-size:12px"></iconify-icon>${escapeHtml(name + page)}</li>`;
+  }).join('');
+  return `<div class="sources-block"><div class="sources-label">Sources</div><ul class="sources-list">${items}</ul></div>`;
 }
 
 /** Task ID / model / duration / token-usage row shown under a finished task.
@@ -192,58 +273,69 @@ function taskMetaRow(task) {
    Task sidebar (history) + Files & Deliverables
    ============================================================ */
 function renderTaskSidebar() {
-  const tasks = Store.getTasks();
+  const chats = Store.getChats();
   const listEl = document.getElementById('task-sidebar-list');
   const emptyEl = document.getElementById('task-sidebar-empty');
-  emptyEl.hidden = tasks.length > 0;
-  listEl.innerHTML = tasks.map((t) => taskSidebarItemHtml(t)).join('');
-  listEl.querySelectorAll('[data-open-task]').forEach((el) => {
+  emptyEl.hidden = chats.length > 0;
+  listEl.innerHTML = chats.map((c) => chatSidebarItemHtml(c)).join('');
+  listEl.querySelectorAll('[data-open-chat]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
-      openTaskFromSidebar(el.dataset.openTask);
+      openChat(el.dataset.openChat);
     });
   });
 
-  const files = tasks.filter((t) => t.result && t.result.type === 'file' && t.result.file_name);
+  // Files & Deliverables — file results + KB uploads in the ACTIVE chat.
+  const files = [];
+  chatMessages.forEach((m) => {
+    if (m.role === 'assistant' && m.result && m.result.type === 'file' && m.result.file_name) {
+      files.push({ name: m.result.file_name, url: m.result.file_url || '#' });
+    }
+    if (m.role === 'system' && m.kind === 'upload' && m.filename) {
+      files.push({ name: m.filename, url: null, kb: true });
+    }
+  });
   const filesListEl = document.getElementById('files-sidebar-list');
   const filesEmptyEl = document.getElementById('files-sidebar-empty');
   filesEmptyEl.hidden = files.length > 0;
-  filesListEl.innerHTML = files.map((t) => `
-    <a href="#" class="task-sidebar-item" data-open-task="${t.task_id}">
-      <iconify-icon icon="${fileTypeIcon(t.result.file_name)}" class="task-sidebar-item-icon"></iconify-icon>
+  filesListEl.innerHTML = files.map((f) => `
+    <a href="${f.url || '#'}" class="task-sidebar-item" ${f.url ? 'target="_blank" rel="noopener"' : 'onclick="return false"'}>
+      <iconify-icon icon="${f.kb ? 'lucide:book-marked' : fileTypeIcon(f.name)}" class="task-sidebar-item-icon"></iconify-icon>
       <div class="task-sidebar-item-body">
-        <div class="task-sidebar-item-title mono">${escapeHtml(truncate(t.result.file_name, 26))}</div>
+        <div class="task-sidebar-item-title mono">${escapeHtml(truncate(f.name, 24))}</div>
       </div>
     </a>
   `).join('');
-  filesListEl.querySelectorAll('[data-open-task]').forEach((el) => {
-    el.addEventListener('click', (e) => { e.preventDefault(); openTaskFromSidebar(el.dataset.openTask); });
-  });
 }
 
-function taskSidebarItemHtml(t) {
-  const isActive = currentTask && currentTask.task_id === t.task_id;
-  const statusDot = t.status === 'completed' ? 'ok' : t.status === 'failed' ? 'err' : 'pending';
+function chatSidebarItemHtml(c) {
+  const isActive = currentChatId && currentChatId === c.chat_id;
   return `
-    <a href="#" class="task-sidebar-item ${isActive ? 'active' : ''}" data-open-task="${t.task_id}">
-      <span class="status-dot ${statusDot} task-sidebar-item-dot"></span>
+    <a href="#" class="task-sidebar-item ${isActive ? 'active' : ''}" data-open-chat="${c.chat_id}">
+      <iconify-icon icon="lucide:message-square" class="task-sidebar-item-icon"></iconify-icon>
       <div class="task-sidebar-item-body">
-        <div class="task-sidebar-item-title">${escapeHtml(truncate(t.prompt, 30))}</div>
+        <div class="task-sidebar-item-title">${escapeHtml(truncate(c.title || 'New Chat', 28))}</div>
       </div>
     </a>`;
 }
 
-function openTaskFromSidebar(taskId) {
-  const task = Store.getTasks().find((t) => t.task_id === taskId);
-  if (!task) return;
+function openChat(chatId) {
+  if (!chatId || chatId === currentChatId) return;
   stopPolling();
-  currentTask = task;
+  currentTask = null;
+  currentChatId = chatId;
+  chatMessages = Store.getChatMessages(chatId);
+  const meta = Store.getChats().find((c) => c.chat_id === chatId);
+  currentChatTitle = meta ? meta.title : null;
+  // Any turn left mid-flight in a previous session is stale — settle it.
+  chatMessages.forEach((m) => {
+    if (m.role === 'assistant' && m.status !== 'completed' && m.status !== 'failed') {
+      m.status = 'failed';
+      m.error = 'This response was interrupted. Ask the question again.';
+    }
+  });
   renderConversation();
   renderTaskSidebar();
-  tick();
-  if (LIVE_BACKEND && (task.status === 'queued' || task.status === 'processing')) {
-    startPollingReal(task.task_id);
-  }
 }
 
 /* ============================================================
@@ -258,17 +350,26 @@ function tick() {
   if (graphOpen) renderGraph(state);
 }
 
+function activeAssistantTurn() {
+  for (let i = chatMessages.length - 1; i >= 0; i--) {
+    if (chatMessages[i].role === 'assistant') return chatMessages[i];
+  }
+  return null;
+}
+
 async function pollReal(taskId) {
   try {
     const data = await Api.getTaskStatus(taskId);
-    const wasSettled = currentTask && (currentTask.status === 'completed' || currentTask.status === 'failed');
-    Object.assign(currentTask, data);
-    Store.updateTask(taskId, data);
+    const turn = activeAssistantTurn();
+    const wasSettled = turn && (turn.status === 'completed' || turn.status === 'failed');
+    if (turn) Object.assign(turn, data);
+    if (currentTask) Object.assign(currentTask, data);
+    persistCurrentChat();
     renderConversation();
     renderTaskSidebar();
     if ((data.status === 'completed' || data.status === 'failed') && !wasSettled) {
       stopPolling();
-      Notifications.notifyTaskSettled(currentTask);
+      if (turn) Notifications.notifyTaskSettled({ task_id: taskId, status: data.status, prompt: currentChatTitle || firstPromptTitle() || 'Chat', error: data.error });
     }
     tick();
   } catch (err) {
@@ -286,25 +387,29 @@ function startPollingReal(taskId) {
    same state machine/UI so the product can be demoed without the full stack. */
 function runDemoSimulation(task) {
   stopPolling();
-  const isFileish = /excel|xlsx|spreadsheet|docx|report|pptx|presentation|approval note/i.test(task.prompt);
-  const isVision = task.file_mime_type && task.file_mime_type.startsWith('image/');
-  const isApproval = /approval note/i.test(task.prompt);
-  const totalMs = 4200;
+  const totalMs = 3200;
   const tId = setInterval(() => tick(), 200);
   setTimeout(() => {
     clearInterval(tId);
-    const model_used = isVision ? 'moondream' : isApproval ? 'approval-note-lora' : 'qwen2.5:1.5b-instruct';
+    const turn = activeAssistantTurn();
     const completed_at = new Date().toISOString();
-    const ext = isFileish ? (/excel|xlsx|spreadsheet/i.test(task.prompt) ? 'xlsx' : /presentation|pptx/i.test(task.prompt) ? 'pptx' : 'docx') : null;
-    const result = isFileish
-      ? { type: 'file', text: null, file_url: '#', file_name: `demo-output-${task.task_id.slice(0, 6)}.${ext}` }
-      : { type: 'text', text: 'This is a demo-simulated response — no real backend was reached, so this content is illustrative only.', file_url: null, file_name: null };
-    Object.assign(currentTask, { status: 'completed', model_used, completed_at, result, error: null });
-    Store.updateTask(task.task_id, currentTask);
+    const patch = {
+      status: 'completed',
+      model_used: 'qwen2.5:1.5b-instruct',
+      completed_at,
+      error: null,
+      result: {
+        type: 'text',
+        text: 'This is a demo-simulated response — no real backend was reached, so this content is illustrative only. Run the backend, agent and tools services to get real chat-scoped Knowledge Base answers.',
+        file_url: null, file_name: null, sources: null,
+      },
+    };
+    if (turn) Object.assign(turn, patch);
+    if (currentTask) Object.assign(currentTask, patch);
+    persistCurrentChat();
     renderConversation();
     renderTaskSidebar();
     tick();
-    Notifications.notifyTaskSettled(currentTask);
   }, totalMs);
 }
 
@@ -343,55 +448,112 @@ function initComposer() {
     syncFilePreview();
   });
 
-  async function submit(fromInput) {
-    const prompt = fromInput.value.trim();
-    if (!prompt) return;
-    idleSend.disabled = true; dockedSend.disabled = true;
+  function setSendEnabled(on) {
+    idleSend.disabled = !on; dockedSend.disabled = !on;
+  }
 
-    let file_base64 = null, file_name = null, file_mime_type = null;
-    if (pendingFile) {
-      file_name = pendingFile.name;
-      file_mime_type = pendingFile.type || null;
-      file_base64 = await fileToBase64(pendingFile);
+  async function handleUpload(file) {
+    ensureChat();
+    const file_name = file.name;
+    const file_mime_type = file.type || (file_name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : null);
+
+    if (file_mime_type !== 'application/pdf' && !file_name.toLowerCase().endsWith('.pdf')) {
+      chatMessages.push({ role: 'system', kind: 'upload-error', filename: file_name, message: 'Only PDF files can be added to the Knowledge Base.' });
+      persistCurrentChat(); renderConversation(); renderTaskSidebar();
+      return;
     }
 
+    if (!LIVE_BACKEND) {
+      chatMessages.push({ role: 'system', kind: 'upload', filename: file_name, chunks: 0, demo: true });
+      persistCurrentChat(); renderConversation(); renderTaskSidebar();
+      toast('Demo mode — the PDF was not actually indexed.');
+      return;
+    }
+
+    const chat_title = currentChatTitle || firstPromptTitle() || null;
+    try {
+      const file_base64 = await fileToBase64(file);
+      const res = await Api.chatUpload(currentChatId, {
+        user_id: Store.USER_ID, file_base64, file_name, file_mime_type, chat_title,
+      });
+      chatMessages.push({ role: 'system', kind: 'upload', filename: res.filename || file_name, chunks: res.chunks || 0, document_id: res.document_id });
+      toast(`${res.filename || file_name} added to the Knowledge Base.`);
+    } catch (err) {
+      chatMessages.push({ role: 'system', kind: 'upload-error', filename: file_name, message: err.message });
+      toast(`Upload failed: ${err.message}`, true);
+    }
+    persistCurrentChat(); renderConversation(); renderTaskSidebar();
+  }
+
+  async function handleMessage(prompt) {
+    ensureChat();
     const submitted_at_client = new Date().toISOString();
+    if (!currentChatTitle) currentChatTitle = truncate(prompt, 40);
+
+    chatMessages.push({ role: 'user', prompt });
+    const assistantTurn = {
+      role: 'assistant', status: 'processing', task_id: null,
+      model_used: null, started_at: submitted_at_client, completed_at: null,
+      result: { type: null, text: null, file_url: null, file_name: null, sources: null }, error: null,
+    };
+    chatMessages.push(assistantTurn);
+    persistCurrentChat();
+    renderConversation();
+    renderTaskSidebar();
+
+    currentTask = {
+      task_id: null, status: 'queued', prompt,
+      model_used: null, started_at: null, completed_at: null,
+      result: { type: null, text: null, file_url: null, file_name: null },
+      error: null, submitted_at_client, demo: !LIVE_BACKEND,
+    };
+    tick();
+
+    if (!LIVE_BACKEND) {
+      assistantTurn.status = 'processing';
+      currentTask.status = 'processing';
+      currentTask.started_at = submitted_at_client;
+      runDemoSimulation(currentTask);
+      return;
+    }
+
+    try {
+      const res = await Api.chatMessage(currentChatId, {
+        user_id: Store.USER_ID, prompt, chat_title: currentChatTitle,
+      });
+      assistantTurn.task_id = res.task_id;
+      currentTask.task_id = res.task_id;
+      currentTask.status = res.status || 'queued';
+      persistCurrentChat();
+      startPollingReal(res.task_id);
+    } catch (err) {
+      assistantTurn.status = 'failed';
+      assistantTurn.error = err.message;
+      currentTask = null;
+      persistCurrentChat();
+      renderConversation();
+      toast(`Couldn't send message: ${err.message}`, true);
+    }
+  }
+
+  async function submit(fromInput) {
+    const prompt = fromInput.value.trim();
+    const file = pendingFile;
+    if (!prompt && !file) return;
+
+    setSendEnabled(false);
     idleInput.value = ''; dockedInput.value = '';
     fileInput.value = '';
     pendingFile = null;
     syncFilePreview();
 
     try {
-      let task_id, status;
-      if (LIVE_BACKEND) {
-        const res = await Api.submitTask({ user_id: Store.USER_ID, prompt, file_base64, file_name, file_mime_type });
-        task_id = res.task_id; status = res.status;
-      } else {
-        task_id = 'demo-' + Math.random().toString(36).slice(2, 10);
-        status = 'queued';
-      }
-      currentTask = {
-        task_id, status, prompt, file_name, file_mime_type,
-        model_used: null, started_at: null, completed_at: null,
-        result: { type: null, text: null, file_url: null, file_name: null }, error: null,
-        submitted_at_client, demo: !LIVE_BACKEND,
-      };
-      Store.addTask(currentTask);
-      renderConversation();
-      renderTaskSidebar();
-      tick();
-
-      if (LIVE_BACKEND) {
-        startPollingReal(task_id);
-      } else {
-        currentTask.started_at = submitted_at_client;
-        currentTask.status = 'processing';
-        runDemoSimulation(currentTask);
-      }
+      if (file) await handleUpload(file);
+      if (prompt) await handleMessage(prompt);
     } catch (err) {
-      toast(`Couldn't submit task: ${err.message}`, true);
+      toast(`Something went wrong: ${err.message}`, true);
     } finally {
-      idleSend.disabled = false; dockedSend.disabled = false;
+      setSendEnabled(true);
     }
   }
 
@@ -402,8 +564,11 @@ function initComposer() {
 
   document.getElementById('nav-new-task').addEventListener('click', (e) => {
     e.preventDefault();
-    currentTask = null;
     stopPolling();
+    currentTask = null;
+    currentChatId = null;
+    currentChatTitle = null;
+    chatMessages = [];
     renderConversation();
     renderTaskSidebar();
     renderLiveStrip({ stages: {} });
@@ -440,8 +605,9 @@ function openGraph() {
   const subtitle = document.getElementById('graph-subtitle');
   const footerTask = document.getElementById('graph-footer-task');
   if (currentTask) {
-    subtitle.textContent = `TASK-${currentTask.task_id.slice(0, 8).toUpperCase()}${currentTask.demo ? ' · DEMO' : ''}`;
-    footerTask.textContent = `TASK: ${currentTask.task_id.slice(0, 12).toUpperCase()}`;
+    const tid = currentTask.task_id || 'pending';
+    subtitle.textContent = `TASK-${tid.slice(0, 8).toUpperCase()}${currentTask.demo ? ' · DEMO' : ''}`;
+    footerTask.textContent = `TASK: ${tid.slice(0, 12).toUpperCase()}`;
     renderGraph(computeGraphState(currentTask, Date.now()));
   } else {
     subtitle.textContent = 'No active task';
@@ -674,7 +840,7 @@ const Notifications = {
       : (task.error ? truncate(task.error, 90) : truncate(task.prompt, 90));
     try {
       const n = new Notification(title, { body, tag: task.task_id });
-      n.onclick = () => { window.focus(); openTaskFromSidebar(task.task_id); };
+      n.onclick = () => { window.focus(); };
     } catch { /* some browsers restrict Notification outside a user gesture context; fail silently */ }
   },
 
@@ -804,6 +970,19 @@ function escapeHtml(str) {
 /* ---------- Init ---------- */
 document.addEventListener('DOMContentLoaded', async () => {
   initComposer();
+  // Resume the most recent chat, if any.
+  const chats = Store.getChats();
+  if (chats.length) {
+    currentChatId = chats[0].chat_id;
+    currentChatTitle = chats[0].title || null;
+    chatMessages = Store.getChatMessages(currentChatId);
+    chatMessages.forEach((m) => {
+      if (m.role === 'assistant' && m.status !== 'completed' && m.status !== 'failed') {
+        m.status = 'failed';
+        m.error = 'This response was interrupted. Ask the question again.';
+      }
+    });
+  }
   renderConversation();
   renderTaskSidebar();
   GradientPicker.init();

@@ -10,8 +10,10 @@ embedding + storage. Everything here is local-only — no external API calls,
 consistent with the air-gapped requirement.
 """
 import hashlib
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 import chromadb
 from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
@@ -30,6 +32,16 @@ _EMBEDDING_FUNCTION = ONNXMiniLM_L6_V2(preferred_providers=["CPUExecutionProvide
 CORPUS_DIR = REPO_ROOT / "tools" / "docs_corpus"
 CHROMA_DIR = REPO_ROOT / "tools" / "chroma_db"
 COLLECTION_NAME = "mrpl_docs"
+
+# Chat-scoped Knowledge Base. A SECOND collection inside the SAME ChromaDB
+# (same PersistentClient, same on-disk store, same embedding function, same
+# _chunk_text) — not a second vector database. Kept separate from
+# COLLECTION_NAME purely so the directory-corpus auto-sync (_sync_corpus,
+# which deletes chunks whose `source` is no longer a file on disk) can never
+# touch documents that were ingested from a chat upload. Every chunk here
+# carries a `chat_id` in its metadata and every query is filtered by it, so
+# a document uploaded in one chat is never retrievable from another.
+CHAT_COLLECTION_NAME = "chat_kb"
 
 # Every directory that may contain searchable source documents. FILES_DIR is
 # intentionally included: it's the same directory Person C's own
@@ -64,6 +76,7 @@ _TEXT_EXTRACTORS = {
 
 _client = None
 _collection = None
+_chat_collection = None
 
 
 def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100):
@@ -224,13 +237,22 @@ def _sync_corpus(collection):
     print(f"[docsearch] --- sync pass complete (collection count after: {collection.count()}) ---")
 
 
-def get_collection():
-    global _client, _collection
-    if _collection is None:
+def _get_client():
+    """The single shared PersistentClient for both collections (corpus + chat KB)."""
+    global _client
+    if _client is None:
         CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         print(f"[docsearch] opening persistent Chroma index at: {CHROMA_DIR.resolve()}")
         _client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        _collection = _client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=_EMBEDDING_FUNCTION)
+    return _client
+
+
+def get_collection():
+    global _collection
+    if _collection is None:
+        _collection = _get_client().get_or_create_collection(
+            name=COLLECTION_NAME, embedding_function=_EMBEDDING_FUNCTION
+        )
         print(f"[docsearch] collection {COLLECTION_NAME!r} loaded, "
               f"{_collection.count()} chunk(s) already persisted on disk")
 
@@ -264,3 +286,187 @@ def search_docs(query: str, top_k: int = 3) -> list[dict]:
             "score": round(float(score), 4),
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# Chat-scoped Knowledge Base (the `chat_kb` collection)
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def get_chat_collection():
+    global _chat_collection
+    if _chat_collection is None:
+        _chat_collection = _get_client().get_or_create_collection(
+            name=CHAT_COLLECTION_NAME, embedding_function=_EMBEDDING_FUNCTION
+        )
+        print(
+            f"[docsearch] chat KB collection {CHAT_COLLECTION_NAME!r} loaded, "
+            f"{_chat_collection.count()} chunk(s) already persisted on disk"
+        )
+    return _chat_collection
+
+
+def ingest_chat_document(
+    chat_id: str,
+    filename: str,
+    pages: List[Tuple[int, str]],
+    document_id: Optional[str] = None,
+    chat_title: Optional[str] = None,
+) -> dict:
+    """
+    Chunk + embed + persist an uploaded document into the chat_kb collection,
+    every chunk tagged with the owning chat_id (mandatory isolation key),
+    document_id, filename and page number.
+
+    `pages` is [(page_number, page_text), ...] as returned by
+    pdf_ingest.extract_pdf_pages — chunking is done per page so page numbers
+    survive into each chunk's metadata for citations.
+
+    Re-uploading the same filename into the same chat replaces that
+    document's existing chunks (mirrors the corpus sync's content-change
+    reindex behavior) rather than duplicating them.
+
+    Returns { document_id, filename, chat_id, chunks, status }.
+    Raises ValueError if no non-empty text chunks could be produced.
+    """
+    if not chat_id or not chat_id.strip():
+        raise ValueError("chat_id is required for chat-scoped ingestion")
+    chat_id = chat_id.strip()
+    document_id = document_id or str(uuid.uuid4())
+
+    collection = get_chat_collection()
+
+    # Duplicate handling: drop any prior chunks for this (chat_id, filename).
+    try:
+        collection.delete(where={"$and": [{"chat_id": chat_id}, {"filename": filename}]})
+    except Exception as e:  # noqa: BLE001
+        print(f"[docsearch] chat KB: could not clear prior chunks for {filename!r} in {chat_id}: {e}")
+
+    uploaded_at = _now_iso()
+    ids: list[str] = []
+    docs: list[str] = []
+    metas: list[dict] = []
+    chunk_index = 0
+    for page_number, page_text in pages:
+        for chunk in _chunk_text(page_text):
+            meta = {
+                "chat_id": chat_id,
+                "document_id": document_id,
+                "filename": filename,
+                "source": filename,  # keep `source` populated too, like the corpus schema
+                "chunk_index": chunk_index,
+                "uploaded_at": uploaded_at,
+            }
+            if page_number is not None:
+                meta["page"] = int(page_number)
+            if chat_title:
+                meta["chat_title"] = chat_title
+            ids.append(f"{chat_id}::{document_id}::{chunk_index}")
+            docs.append(chunk)
+            metas.append(meta)
+            chunk_index += 1
+
+    if not ids:
+        raise ValueError("no extractable text content in document")
+
+    print(
+        f"[docsearch] chat KB: adding {len(ids)} chunk(s) for document {filename!r} "
+        f"(document_id={document_id}) in chat {chat_id}"
+    )
+    collection.add(ids=ids, documents=docs, metadatas=metas)
+    return {
+        "document_id": document_id,
+        "filename": filename,
+        "chat_id": chat_id,
+        "chunks": len(ids),
+        "status": "indexed",
+    }
+
+
+def search_chat_docs(query: str, chat_id: str, top_k: int = 4) -> list[dict]:
+    """
+    Vector search restricted to ONE chat's uploaded documents.
+    The `where={"chat_id": chat_id}` filter is mandatory — a document
+    uploaded in another chat can never be returned here.
+    """
+    if not chat_id or not chat_id.strip():
+        return []
+    chat_id = chat_id.strip()
+    collection = get_chat_collection()
+    try:
+        count = collection.count()
+    except Exception:  # noqa: BLE001
+        count = 0
+    if count == 0:
+        return []
+
+    top_k = max(1, min(top_k, count))
+    result = collection.query(
+        query_texts=[query],
+        n_results=top_k,
+        where={"chat_id": chat_id},
+    )
+
+    out = []
+    docs = result.get("documents", [[]])[0]
+    metas = result.get("metadatas", [[]])[0]
+    dists = result.get("distances", [[]])[0]
+    for text, meta, dist in zip(docs, metas, dists):
+        meta = meta or {}
+        score = 1.0 / (1.0 + dist) if dist is not None else 0.0
+        out.append({
+            "text": text,
+            "source": meta.get("filename") or meta.get("source", "unknown"),
+            "page": meta.get("page"),
+            "document_id": meta.get("document_id"),
+            "score": round(float(score), 4),
+        })
+    return out
+
+
+def list_chat_documents(chat_id: Optional[str] = None) -> list[dict]:
+    """
+    Aggregates the chat_kb collection's chunk metadata into a per-document
+    listing for the Admin -> Knowledge Base view. No separate table — the
+    vector store's own metadata is the single source of truth.
+    """
+    collection = get_chat_collection()
+    where = {"chat_id": chat_id.strip()} if chat_id and chat_id.strip() else None
+    try:
+        got = collection.get(where=where, include=["metadatas"])
+    except Exception as e:  # noqa: BLE001
+        print(f"[docsearch] chat KB: list_chat_documents failed: {e}")
+        return []
+
+    by_doc: dict[str, dict] = {}
+    for meta in got.get("metadatas") or []:
+        if not meta:
+            continue
+        document_id = meta.get("document_id") or meta.get("filename")
+        entry = by_doc.get(document_id)
+        filename = meta.get("filename") or meta.get("source") or "unknown"
+        ext = Path(filename).suffix.lower().lstrip(".") or "pdf"
+        if entry is None:
+            by_doc[document_id] = {
+                "document_id": document_id,
+                "filename": filename,
+                "file_type": ext,
+                "chat_id": meta.get("chat_id"),
+                "chat_title": meta.get("chat_title"),
+                "uploaded_at": meta.get("uploaded_at"),
+                "chunks": 1,
+                "status": "indexed",
+            }
+        else:
+            entry["chunks"] += 1
+            if not entry.get("chat_title") and meta.get("chat_title"):
+                entry["chat_title"] = meta.get("chat_title")
+
+    return sorted(
+        by_doc.values(),
+        key=lambda d: (d.get("uploaded_at") or ""),
+        reverse=True,
+    )

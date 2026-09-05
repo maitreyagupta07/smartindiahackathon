@@ -5,10 +5,12 @@ Per §2.5 locked-in model names:
   - vision:    moondream
 """
 from router.classifier import classify_task, needs_reasoning
-from router.model_registry import get_model_for_task_type
+from router.model_registry import get_model_for_task_type, TEXT_MODEL
 
 
-async def route_task(prompt: str, file_mime_type: str | None) -> tuple[str, str, bool]:
+async def route_task(
+    prompt: str, file_mime_type: str | None, chat_id: str | None = None
+) -> tuple[str, str, bool]:
     """
     Returns (task_type, model_name, needs_reasoning_flag).
 
@@ -16,7 +18,15 @@ async def route_task(prompt: str, file_mime_type: str | None) -> tuple[str, str,
     task_type == "vision" with needs_reasoning_flag == True, the planner
     (executor/planner.py) is responsible for chaining a second Qwen step
     after Moondream's observation — routing only decides the entry point.
+
+    When `chat_id` is set the request is part of a chat conversation:
+    task_type is "chat" and the planner runs chat-scoped KB retrieval +
+    conversation context before the final Qwen answer.
     """
+    if chat_id and chat_id.strip():
+        print(f"[ROUTER] chat_id={chat_id!r} -> task_type=chat first_model={TEXT_MODEL}")
+        return "chat", TEXT_MODEL, False
+
     task_type = classify_task(prompt, file_mime_type)
     model_name = get_model_for_task_type(task_type)
     reasoning_flag = needs_reasoning(prompt, file_mime_type)
