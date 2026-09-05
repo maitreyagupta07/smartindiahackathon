@@ -73,6 +73,7 @@ from typing import Literal, Optional
 from executor.state import TaskState
 from router.model_registry import TEXT_MODEL, VISION_MODEL, LORA_ADAPTER, is_approval_note_request
 from router.classifier import FILE_FORMAT_KEYWORDS
+from clients.pdf_extract import extract_text_from_pdf, is_pdf
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
 ToolName = Literal["execute_code", "search_docs", "generate_file"]
@@ -340,6 +341,34 @@ def _parse_structured_content(text: str) -> Optional[dict]:
     return None
 
 
+def _build_lora_prompt(state: TaskState, base_prompt: str) -> str:
+    """
+    If an uploaded PDF came with this approval-note request (a real or
+    scanned inspection report — contract §2.4's file_base64/file_mime_type),
+    ground the adapter's prompt in the report's actual extracted text
+    instead of writing a generic note out of thin air. Extraction is only
+    ever attempted here, for an approval-note request — a PDF attached to
+    an unrelated request is left completely alone (see PERSON_A_NOTES.md).
+    Falls back to the plain prompt if there's no file, it's not a PDF, or
+    nothing could be extracted from it (e.g. a scanned PDF on a machine
+    without tesseract-ocr installed) — never blocks the request on this.
+    """
+    if not (state.file_base64 and is_pdf(state.file_mime_type)):
+        return base_prompt
+    extracted = extract_text_from_pdf(state.file_base64)
+    if not extracted:
+        print(
+            f"[PLANNER] task_id={state.task_id} PDF uploaded but no text could be "
+            f"extracted (scanned page + no OCR available?) -> using prompt only"
+        )
+        return base_prompt
+    print(
+        f"[PLANNER] task_id={state.task_id} using extracted PDF text "
+        f"({len(extracted)} chars) as approval-note grounding"
+    )
+    return f"{base_prompt}\n\nInspection report content:\n{extracted}"
+
+
 def _strip_file_format_phrase(prompt: str) -> str:
     """
     Trims a trailing file-format ask (e.g. ", save it as a word document")
@@ -546,10 +575,11 @@ def decide_next_step(state: TaskState) -> NextStep:
                     f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={LORA_ADAPTER} "
                     f"(filegen: approval-note LoRA adapter, called in its trained free-text format)"
                 )
+                core_prompt = _strip_file_format_phrase(state.prompt)
                 return NextStep(
                     action="call_qwen",
                     model=LORA_ADAPTER,
-                    prompt=FILEGEN_CONTENT_MARKER + _strip_file_format_phrase(state.prompt),
+                    prompt=FILEGEN_CONTENT_MARKER + _build_lora_prompt(state, core_prompt),
                 )
             print(
                 f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={filegen_model} "
@@ -575,7 +605,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                 f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={LORA_ADAPTER} "
                 f"(text entry point: approval-note LoRA adapter, called in its trained format)"
             )
-            return NextStep(action="call_qwen", model=LORA_ADAPTER, prompt=state.prompt)
+            return NextStep(action="call_qwen", model=LORA_ADAPTER, prompt=_build_lora_prompt(state, state.prompt))
 
         print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={TEXT_MODEL} (text entry point)")
         return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=state.prompt)

@@ -4,3 +4,14 @@ httpx==0.27.2
 pydantic==2.9.2
 pytest==8.3.3
 pytest-asyncio==0.24.0
+
+# PDF/scanned-report ingestion (executor/../clients/pdf_extract.py) — pure
+# pip packages, no system dependency, work fully offline/air-gapped.
+pdfplumber==0.11.4
+pymupdf==1.24.11
+
+# OCR fallback for scanned (image-only) PDFs. pytesseract is only a wrapper
+# — it needs the system `tesseract-ocr` package installed separately
+# (e.g. `sudo apt-get install tesseract-ocr`); pip cannot install that part.
+pytesseract==0.3.13
+Pillow==10.4.0
