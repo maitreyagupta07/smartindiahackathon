@@ -15,7 +15,9 @@ const PHASE_LABEL = {
 };
 
 let LIVE_BACKEND = false;
-let currentTask = null; // the task object driving the UI right now
+let currentTask = null;      // the active (latest) turn of the open conversation
+let currentThreadId = null;  // id of the open conversation, null when idle
+let currentTurns = [];       // every turn of the open conversation, oldest → newest
 let pollHandle = null;
 
 /* ============================================================
@@ -72,10 +74,10 @@ function routeLabelFor(branch) {
    View switching: idle (centered composer) vs active conversation
    ============================================================ */
 function updateViewMode() {
-  const hasTask = !!currentTask;
-  document.getElementById('idle-view').hidden = hasTask;
-  document.getElementById('conversation-scroll').hidden = !hasTask;
-  document.getElementById('composer-dock').hidden = !hasTask;
+  const hasThread = currentTurns.length > 0;
+  document.getElementById('idle-view').hidden = hasThread;
+  document.getElementById('conversation-scroll').hidden = !hasThread;
+  document.getElementById('composer-dock').hidden = !hasThread;
 }
 
 /* ============================================================
@@ -121,32 +123,42 @@ function renderLiveStrip(state) {
    ============================================================ */
 function renderConversation() {
   updateViewMode();
-  if (!currentTask) {
+  if (currentTurns.length === 0) {
     document.getElementById('topbar-task-title').textContent = 'Workspace';
     document.getElementById('topbar-task-id').textContent = '';
     return;
   }
-  document.getElementById('topbar-task-title').textContent = truncate(currentTask.prompt, 60);
-  document.getElementById('topbar-task-id').textContent = `#${currentTask.task_id.slice(0, 8).toUpperCase()}`;
+  const first = currentTurns[0];
+  document.getElementById('topbar-task-title').textContent = truncate(first.prompt, 60);
+  document.getElementById('topbar-task-id').textContent =
+    `#${(currentThreadId || first.task_id).slice(-8).toUpperCase()}`;
 
   const inner = document.getElementById('conversation-inner');
+  inner.innerHTML = currentTurns.map((turn) => turnHtml(turn)).join('');
+
+  const scroll = document.getElementById('conversation-scroll');
+  if (scroll) scroll.scrollTop = scroll.scrollHeight;
+}
+
+/** One prompt + response pair in the conversation transcript. */
+function turnHtml(turn) {
   const userMsg = `
     <div class="msg-user">
-      <div class="bubble">${escapeHtml(currentTask.prompt)}</div>
-      ${currentTask.file_name ? `<div class="file-chip"><iconify-icon icon="${fileTypeIcon(currentTask.file_name)}"></iconify-icon>${escapeHtml(currentTask.file_name)}</div>` : ''}
+      <div class="bubble">${escapeHtml(turn.prompt)}</div>
+      ${turn.file_name ? `<div class="file-chip"><iconify-icon icon="${fileTypeIcon(turn.file_name)}"></iconify-icon>${escapeHtml(turn.file_name)}</div>` : ''}
     </div>`;
 
   let aiMsg = '';
-  if (currentTask.status === 'failed') {
-    aiMsg = `<div class="msg-ai"><div class="error-banner"><iconify-icon icon="lucide:alert-triangle" style="font-size:16px;flex-shrink:0;margin-top:1px"></iconify-icon><div>${escapeHtml(currentTask.error || 'The task failed.')}</div></div>${taskMetaRow(currentTask)}</div>`;
-  } else if (currentTask.status === 'completed') {
-    const chip = currentTask.model_used
-      ? `<div class="model-chip"><iconify-icon icon="lucide:terminal" style="font-size:12px"></iconify-icon><span class="mono">${escapeHtml(currentTask.model_used)}</span></div>`
+  if (turn.status === 'failed') {
+    aiMsg = `<div class="msg-ai"><div class="error-banner"><iconify-icon icon="lucide:alert-triangle" style="font-size:16px;flex-shrink:0;margin-top:1px"></iconify-icon><div>${escapeHtml(turn.error || 'The task failed.')}</div></div>${taskMetaRow(turn)}</div>`;
+  } else if (turn.status === 'completed') {
+    const chip = turn.model_used
+      ? `<div class="model-chip"><iconify-icon icon="lucide:terminal" style="font-size:12px"></iconify-icon><span class="mono">${escapeHtml(turn.model_used)}</span></div>`
       : '';
     let body = '';
-    if (currentTask.result && currentTask.result.type === 'file') {
-      const fn = currentTask.result.file_name || 'deliverable';
-      const url = currentTask.result.file_url || '#';
+    if (turn.result && turn.result.type === 'file') {
+      const fn = turn.result.file_name || 'deliverable';
+      const url = turn.result.file_url || '#';
       body = `
         <div class="deliverable-card">
           <div class="left">
@@ -161,17 +173,17 @@ function renderConversation() {
             <a class="btn-icon-accent" href="${url}" download><iconify-icon icon="lucide:download" style="font-size:16px"></iconify-icon></a>
           </div>
         </div>`;
-    } else if (currentTask.result && currentTask.result.text) {
-      body = `<p class="summary-text">${escapeHtml(currentTask.result.text)}</p>`;
+    } else if (turn.result && turn.result.text) {
+      body = `<p class="summary-text">${escapeHtml(turn.result.text)}</p>`;
     } else {
       body = `<p class="summary-text" style="color:var(--text-muted)">Task completed with no returned content.</p>`;
     }
-    aiMsg = `<div class="msg-ai">${chip}${body}${taskMetaRow(currentTask)}</div>`;
+    aiMsg = `<div class="msg-ai">${chip}${body}${taskMetaRow(turn)}</div>`;
   } else {
     aiMsg = `<div class="msg-ai"><p class="summary-text" style="color:var(--text-muted)">Working on it${LIVE_BACKEND ? '' : ' (demo simulation)'}…</p></div>`;
   }
 
-  inner.innerHTML = userMsg + aiMsg;
+  return userMsg + aiMsg;
 }
 
 /** Task ID / model / duration / token-usage row shown under a finished task.
@@ -191,58 +203,79 @@ function taskMetaRow(task) {
 /* ============================================================
    Task sidebar (history) + Files & Deliverables
    ============================================================ */
+/** Group the flat task store into conversations. Each stored task carries a
+ *  `thread_id`; legacy tasks without one are treated as a single-turn thread. */
+function threadsFromStore() {
+  const tasks = Store.getTasks(); // newest-first
+  const map = new Map();
+  for (let i = tasks.length - 1; i >= 0; i--) { // oldest-first so turns land in order
+    const t = tasks[i];
+    const tid = t.thread_id || t.task_id;
+    if (!map.has(tid)) map.set(tid, { thread_id: tid, turns: [] });
+    map.get(tid).turns.push(t);
+  }
+  const lastTs = (th) => new Date(th.turns[th.turns.length - 1].submitted_at_client || 0).getTime();
+  return [...map.values()].sort((a, b) => lastTs(b) - lastTs(a));
+}
+
 function renderTaskSidebar() {
-  const tasks = Store.getTasks();
+  const threads = threadsFromStore();
   const listEl = document.getElementById('task-sidebar-list');
   const emptyEl = document.getElementById('task-sidebar-empty');
-  emptyEl.hidden = tasks.length > 0;
-  listEl.innerHTML = tasks.map((t) => taskSidebarItemHtml(t)).join('');
-  listEl.querySelectorAll('[data-open-task]').forEach((el) => {
+  emptyEl.hidden = threads.length > 0;
+  listEl.innerHTML = threads.map((th) => threadSidebarItemHtml(th)).join('');
+  listEl.querySelectorAll('[data-open-thread]').forEach((el) => {
     el.addEventListener('click', (e) => {
       e.preventDefault();
-      openTaskFromSidebar(el.dataset.openTask);
+      openThreadFromSidebar(el.dataset.openThread);
     });
   });
 
-  const files = tasks.filter((t) => t.result && t.result.type === 'file' && t.result.file_name);
+  const files = Store.getTasks().filter((t) => t.result && t.result.type === 'file' && t.result.file_name);
   const filesListEl = document.getElementById('files-sidebar-list');
   const filesEmptyEl = document.getElementById('files-sidebar-empty');
   filesEmptyEl.hidden = files.length > 0;
   filesListEl.innerHTML = files.map((t) => `
-    <a href="#" class="task-sidebar-item" data-open-task="${t.task_id}">
+    <a href="#" class="task-sidebar-item" data-open-thread="${t.thread_id || t.task_id}">
       <iconify-icon icon="${fileTypeIcon(t.result.file_name)}" class="task-sidebar-item-icon"></iconify-icon>
       <div class="task-sidebar-item-body">
         <div class="task-sidebar-item-title mono">${escapeHtml(truncate(t.result.file_name, 26))}</div>
       </div>
     </a>
   `).join('');
-  filesListEl.querySelectorAll('[data-open-task]').forEach((el) => {
-    el.addEventListener('click', (e) => { e.preventDefault(); openTaskFromSidebar(el.dataset.openTask); });
+  filesListEl.querySelectorAll('[data-open-thread]').forEach((el) => {
+    el.addEventListener('click', (e) => { e.preventDefault(); openThreadFromSidebar(el.dataset.openThread); });
   });
 }
 
-function taskSidebarItemHtml(t) {
-  const isActive = currentTask && currentTask.task_id === t.task_id;
-  const statusDot = t.status === 'completed' ? 'ok' : t.status === 'failed' ? 'err' : 'pending';
+function threadSidebarItemHtml(th) {
+  const first = th.turns[0];
+  const last = th.turns[th.turns.length - 1];
+  const isActive = currentThreadId === th.thread_id;
+  const statusDot = last.status === 'completed' ? 'ok' : last.status === 'failed' ? 'err' : 'pending';
+  const count = th.turns.length;
   return `
-    <a href="#" class="task-sidebar-item ${isActive ? 'active' : ''}" data-open-task="${t.task_id}">
+    <a href="#" class="task-sidebar-item ${isActive ? 'active' : ''}" data-open-thread="${th.thread_id}">
       <span class="status-dot ${statusDot} task-sidebar-item-dot"></span>
       <div class="task-sidebar-item-body">
-        <div class="task-sidebar-item-title">${escapeHtml(truncate(t.prompt, 30))}</div>
+        <div class="task-sidebar-item-title">${escapeHtml(truncate(first.prompt, 30))}</div>
       </div>
+      ${count > 1 ? `<span class="task-sidebar-item-count mono">${count}</span>` : ''}
     </a>`;
 }
 
-function openTaskFromSidebar(taskId) {
-  const task = Store.getTasks().find((t) => t.task_id === taskId);
-  if (!task) return;
+function openThreadFromSidebar(threadId) {
+  const thread = threadsFromStore().find((t) => t.thread_id === threadId);
+  if (!thread) return;
   stopPolling();
-  currentTask = task;
+  currentThreadId = threadId;
+  currentTurns = thread.turns.map((t) => ({ ...t }));
+  currentTask = currentTurns[currentTurns.length - 1];
   renderConversation();
   renderTaskSidebar();
   tick();
-  if (LIVE_BACKEND && (task.status === 'queued' || task.status === 'processing')) {
-    startPollingReal(task.task_id);
+  if (LIVE_BACKEND && (currentTask.status === 'queued' || currentTask.status === 'processing')) {
+    startPollingReal(currentTask.task_id);
   }
 }
 
@@ -346,6 +379,10 @@ function initComposer() {
   async function submit(fromInput) {
     const prompt = fromInput.value.trim();
     if (!prompt) return;
+    if (currentTask && (currentTask.status === 'queued' || currentTask.status === 'processing')) {
+      toast('Wait for the current response before sending another message.', true);
+      return;
+    }
     idleSend.disabled = true; dockedSend.disabled = true;
 
     let file_base64 = null, file_name = null, file_mime_type = null;
@@ -370,12 +407,14 @@ function initComposer() {
         task_id = 'demo-' + Math.random().toString(36).slice(2, 10);
         status = 'queued';
       }
+      if (!currentThreadId) currentThreadId = 'th-' + Math.random().toString(36).slice(2, 10);
       currentTask = {
-        task_id, status, prompt, file_name, file_mime_type,
+        task_id, status, prompt, file_name, file_mime_type, thread_id: currentThreadId,
         model_used: null, started_at: null, completed_at: null,
         result: { type: null, text: null, file_url: null, file_name: null }, error: null,
         submitted_at_client, demo: !LIVE_BACKEND,
       };
+      currentTurns.push(currentTask);
       Store.addTask(currentTask);
       renderConversation();
       renderTaskSidebar();
@@ -402,8 +441,12 @@ function initComposer() {
 
   document.getElementById('nav-new-task').addEventListener('click', (e) => {
     e.preventDefault();
-    currentTask = null;
     stopPolling();
+    // The finished conversation stays in the store, so it keeps its place in
+    // the task sidebar as a single grouped thread — just detach from it here.
+    currentTask = null;
+    currentThreadId = null;
+    currentTurns = [];
     renderConversation();
     renderTaskSidebar();
     renderLiveStrip({ stages: {} });
@@ -674,7 +717,7 @@ const Notifications = {
       : (task.error ? truncate(task.error, 90) : truncate(task.prompt, 90));
     try {
       const n = new Notification(title, { body, tag: task.task_id });
-      n.onclick = () => { window.focus(); openTaskFromSidebar(task.task_id); };
+      n.onclick = () => { window.focus(); openThreadFromSidebar(task.thread_id || task.task_id); };
     } catch { /* some browsers restrict Notification outside a user gesture context; fail silently */ }
   },
 
