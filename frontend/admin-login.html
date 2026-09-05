@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Access — Sovereign AI</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+</head>
+<body>
+<div class="admin-login-shell">
+  <div class="hero-gradient"></div>
+  <div class="admin-login-card">
+    <div class="admin-login-mark"><iconify-icon icon="lucide:shield"></iconify-icon></div>
+    <h1 id="login-title">Admin Access</h1>
+    <p id="login-subtitle">Enter the admin passcode to continue to Sovereign AI Operations.</p>
+
+    <form id="login-form">
+      <div class="admin-login-field">
+        <label for="passcode-input" id="passcode-label">Passcode</label>
+        <input id="passcode-input" type="password" autocomplete="current-password" placeholder="••••••••">
+      </div>
+      <div class="admin-login-field" id="confirm-field" hidden>
+        <label for="passcode-confirm">Confirm passcode</label>
+        <input id="passcode-confirm" type="password" autocomplete="new-password" placeholder="••••••••">
+      </div>
+      <button type="submit" class="admin-login-submit" id="login-submit">Continue</button>
+      <p class="admin-login-error" id="login-error"></p>
+    </form>
+
+    <div class="admin-login-note">
+      This is a lightweight, browser-local access gate — the current backend
+      contract has no login/session API, so this does not replace real
+      server-side authentication. It only keeps the Admin shell from being
+      one click away from the User workbench.
+    </div>
+    <a href="index.html" class="admin-login-back"><iconify-icon icon="lucide:arrow-left"></iconify-icon>Back to User Workbench</a>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script>
+  const form = document.getElementById('login-form');
+  const input = document.getElementById('passcode-input');
+  const confirmField = document.getElementById('confirm-field');
+  const confirmInput = document.getElementById('passcode-confirm');
+  const errorEl = document.getElementById('login-error');
+  const isFirstRun = !AdminAuth.hasPasscode();
+
+  if (isFirstRun) {
+    document.getElementById('login-title').textContent = 'Set Up Admin Access';
+    document.getElementById('login-subtitle').textContent = 'No admin passcode is set yet on this device. Choose one to continue.';
+    document.getElementById('passcode-label').textContent = 'New passcode';
+    document.getElementById('login-submit').textContent = 'Set passcode & continue';
+    confirmField.hidden = false;
+  }
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.classList.add('show');
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    errorEl.classList.remove('show');
+    const val = input.value;
+
+    if (isFirstRun) {
+      if (val.length < 4) { showError('Choose a passcode with at least 4 characters.'); return; }
+      if (val !== confirmInput.value) { showError('Passcodes do not match.'); return; }
+      AdminAuth.setPasscode(val);
+    } else if (!AdminAuth.checkPasscode(val)) {
+      showError('Incorrect passcode.');
+      return;
+    }
+
+    AdminAuth.startSession();
+    const params = new URLSearchParams(location.search);
+    const next = params.get('next') || 'admin.html';
+    location.href = next;
+  });
+
+  input.focus();
+</script>
+</body>
+</html>

@@ -25,14 +25,22 @@ from pydantic import BaseModel
 # ---------------------------------------------------------------------------
 # Config — read from shared config.json, never hardcode (self-check §2.10.4)
 # ---------------------------------------------------------------------------
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_PATH = REPO_ROOT / "config.json"
 with open(CONFIG_PATH) as f:
     CONFIG = json.load(f)
 
 BACKEND_PORT = CONFIG["ports"]["backend"]
 EXECUTOR_PORT = CONFIG["ports"]["agent_executor"]
 EXECUTOR_URL = f"http://localhost:{EXECUTOR_PORT}/execute-task"
-FILES_DIR = Path(CONFIG["FILES_DIR"]).resolve()
+# Anchor to REPO_ROOT rather than resolving "./shared_files" against the
+# process's cwd — this README documents launching from *inside* backend/,
+# which would otherwise silently resolve to backend/shared_files, a
+# different physical directory than the one Person C's tools service (see
+# tools/app/config.py, which anchors the same way) actually writes
+# generated files into. That mismatch would 404 every /files/<name> link.
+_raw_files_dir = Path(CONFIG["FILES_DIR"])
+FILES_DIR = _raw_files_dir if _raw_files_dir.is_absolute() else (REPO_ROOT / _raw_files_dir).resolve()
 FILES_DIR.mkdir(parents=True, exist_ok=True)
 MAX_CONCURRENT_TASKS = CONFIG.get("backend", {}).get("max_concurrent_tasks", 2)
 

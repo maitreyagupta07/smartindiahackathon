@@ -1,0 +1,44 @@
+{
+  "targets": {
+    "user-workspace-task-view": {
+      "projectId": "0fdaecd5-0700-418e-8fe1-67b3fd26a94e",
+      "activeDraftId": "b0c0331c-d9c0-430f-8ef8-c1db584a5cfd",
+      "kind": "brand-new-project",
+      "contextFiles": [".superdesign/design-system.md"],
+      "referenceIds": [
+        "302c64f0-047c-4867-a546-cc1f84c3a462",
+        "7b713fab-75db-4517-bbcd-0c8594beb149",
+        "9d6bfecc-c863-4129-ad9c-a6f8884b2f03"
+      ]
+    },
+    "maximized-activity-map": {
+      "projectId": "0fdaecd5-0700-418e-8fe1-67b3fd26a94e",
+      "activeDraftId": "eb0d9e9c-5460-41d6-9cac-068044283add",
+      "kind": "flow-page",
+      "sourceDraftId": "b0c0331c-d9c0-430f-8ef8-c1db584a5cfd",
+      "contextFiles": [".superdesign/design-system.md"]
+    },
+    "admin-control-center-overview": {
+      "projectId": "0fdaecd5-0700-418e-8fe1-67b3fd26a94e",
+      "activeDraftId": "3b85c84a-1ec4-44ba-a88c-408ab353ea96",
+      "kind": "flow-page",
+      "sourceDraftId": "b0c0331c-d9c0-430f-8ef8-c1db584a5cfd",
+      "contextFiles": [".superdesign/design-system.md"]
+    },
+    "security-and-sovereignty": {
+      "projectId": "0fdaecd5-0700-418e-8fe1-67b3fd26a94e",
+      "activeDraftId": "2d36e532-5bcf-475d-ae68-2b3b2cc0f63f",
+      "kind": "flow-page",
+      "sourceDraftId": "b0c0331c-d9c0-430f-8ef8-c1db584a5cfd",
+      "contextFiles": [".superdesign/design-system.md"]
+    }
+  },
+  "referenceAssetsUploaded": {
+    "primary-aesthetic-workspace": "302c64f0-047c-4867-a546-cc1f84c3a462",
+    "activity-map-steps": "7b713fab-75db-4517-bbcd-0c8594beb149",
+    "model-routing-diagram": "7cdc1bed-f263-446d-801c-dca710a9c71c",
+    "chat-with-inline-process-flow": "9d6bfecc-c863-4129-ad9c-a6f8884b2f03",
+    "expandable-step-detail-panel": "892d6bd8-1191-4883-9f68-07d8d39e3963",
+    "admin-usage-table": "5f9911bf-7cfc-4b74-834f-c26102b918bb"
+  }
+}

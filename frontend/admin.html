@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sovereign AI Operations</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><iconify-icon icon="lucide:terminal"></iconify-icon></div>
+      <span class="name" style="font-size:11px;letter-spacing:.06em">AI Operations</span>
+    </div>
+    <nav class="sidebar-nav custom-scroll">
+      <div class="sidebar-section-label">System Management</div>
+      <a href="#overview" class="nav-item active" data-tab="overview"><iconify-icon icon="lucide:layout-dashboard"></iconify-icon><span>Overview</span></a>
+      <a href="#users" class="nav-item" data-tab="users"><iconify-icon icon="lucide:users"></iconify-icon><span>Users</span></a>
+      <a href="#activity" class="nav-item" data-tab="activity"><iconify-icon icon="lucide:activity"></iconify-icon><span>Task Activity</span></a>
+      <a href="#routing" class="nav-item" data-tab="routing"><iconify-icon icon="lucide:route"></iconify-icon><span>Model &amp; Routing</span></a>
+      <div class="sidebar-section-label">Knowledge</div>
+      <a href="#knowledge" class="nav-item" data-tab="knowledge"><iconify-icon icon="lucide:book-marked"></iconify-icon><span>Knowledge Base</span></a>
+      <div class="sidebar-section-label">Compliance &amp; Security</div>
+      <a href="#audit" class="nav-item" data-tab="audit"><iconify-icon icon="lucide:file-search"></iconify-icon><span>Audit Log</span></a>
+      <a href="#sovereignty" class="nav-item" data-tab="sovereignty"><iconify-icon icon="lucide:shield-check"></iconify-icon><span>Security &amp; Sovereignty</span></a>
+      <div class="sidebar-section-label">Infrastructure</div>
+      <a href="#resources" class="nav-item" data-tab="resources"><iconify-icon icon="lucide:cpu"></iconify-icon><span>System Resources</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <a href="index.html" class="nav-item"><iconify-icon icon="lucide:arrow-left-right"></iconify-icon><span>User Workbench</span></a>
+      <a href="#" id="admin-logout" class="nav-item"><iconify-icon icon="lucide:log-out"></iconify-icon><span>Log Out</span></a>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="hero-gradient"></div>
+    <header class="topbar">
+      <div class="topbar-left">
+        <span id="admin-page-title" style="color:var(--text-primary);font-weight:500">Overview</span>
+        <span class="admin-badge">AIR-GAPPED</span>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" data-theme-toggle title="Toggle theme">
+          <iconify-icon data-icon-sun icon="lucide:sun"></iconify-icon>
+          <iconify-icon data-icon-moon icon="lucide:moon" class="hidden"></iconify-icon>
+        </button>
+      </div>
+    </header>
+
+    <div class="conversation-scroll custom-scroll" style="padding:24px 24px 60px">
+      <div class="admin-tabs-content" style="max-width:1080px;margin:0 auto;display:flex;flex-direction:column;gap:28px">
+
+        <!-- Overview -->
+        <section id="tab-overview" class="active" style="flex-direction:column;gap:24px">
+          <div class="stats-row">
+            <div class="stat-block">
+              <div class="label">Tasks Logged</div>
+              <div class="value" id="stat-total">—</div>
+              <div class="sub"><iconify-icon icon="lucide:database"></iconify-icon>FROM AUDIT LOG</div>
+            </div>
+            <div class="stat-block">
+              <div class="label">Unique Users</div>
+              <div class="value" id="stat-users">—</div>
+              <div class="sub"><iconify-icon icon="lucide:users-2"></iconify-icon>ALL-TIME</div>
+            </div>
+            <div class="stat-block">
+              <div class="label">Tasks With Attachments</div>
+              <div class="value" id="stat-files">—</div>
+              <div class="sub"><iconify-icon icon="lucide:paperclip"></iconify-icon>FILE_UPLOADED=TRUE</div>
+            </div>
+            <div class="stat-block">
+              <div class="label">Distinct Task Types</div>
+              <div class="value" id="stat-types">—</div>
+              <div class="sub"><iconify-icon icon="lucide:tags"></iconify-icon>OBSERVED</div>
+            </div>
+          </div>
+
+          <div>
+            <span class="section-label">Model Distribution (all logged tasks)</span>
+            <div class="panel panel-pad">
+              <div class="dist-bar" id="model-dist-bar"></div>
+              <div class="dist-legend" id="model-dist-legend"></div>
+            </div>
+          </div>
+
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span class="section-label">Recent Task Activity</span>
+              <a href="#activity" class="nav-item-link" id="overview-view-all" style="font-size:12px;color:var(--accent);margin-bottom:10px">View all &rarr;</a>
+            </div>
+            <div class="panel">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Task ID</th><th>User</th><th>Type</th><th>Model</th><th class="num">Timestamp</th>
+                  </tr>
+                </thead>
+                <tbody id="overview-preview-tbody"></tbody>
+              </table>
+              <div class="table-empty" id="overview-preview-empty" hidden>
+                <iconify-icon icon="lucide:database-zap"></iconify-icon>
+                <span>No tasks logged yet.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Users -->
+        <section id="tab-users" style="flex-direction:column;gap:14px">
+          <span class="section-label">Users</span>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:560px">Derived client-side from the Audit Log's <span class="mono">user_id</span> field — there is no dedicated user-management endpoint in the current backend contract, so this is real observed activity, not a separate user directory.</p>
+          <div class="panel">
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th><th class="num">Tasks</th><th>Models Used</th><th>Attachments</th><th class="num">Last Active</th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody"></tbody>
+            </table>
+            <div class="table-empty" id="users-empty" hidden>
+              <iconify-icon icon="lucide:users"></iconify-icon>
+              <span>No user activity logged yet.</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Task Activity (full interactive table) -->
+        <section id="tab-activity">
+          <span class="section-label">Task Activity</span>
+          <div id="audit-table-panel"></div>
+        </section>
+
+        <!-- Model & Routing -->
+        <section id="tab-routing" style="flex-direction:column;gap:24px">
+          <div>
+            <span class="section-label">Model Identities</span>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+              <div class="panel panel-pad">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                  <div class="node-icon" style="background:var(--accent-wash);color:var(--accent);width:32px;height:32px;border-radius:8px"><iconify-icon icon="lucide:terminal"></iconify-icon></div>
+                  <div>
+                    <div style="font-size:13.5px;font-weight:600">Text / Code</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-muted)">qwen2.5:1.5b-instruct</div>
+                  </div>
+                </div>
+                <div class="status-cell" style="color:var(--success);font-size:12px"><span class="status-dot ok" style="width:6px;height:6px"></span>Configured</div>
+              </div>
+              <div class="panel panel-pad">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                  <div class="node-icon" style="background:var(--border-subtle);color:var(--text-secondary);width:32px;height:32px;border-radius:8px"><iconify-icon icon="lucide:eye"></iconify-icon></div>
+                  <div>
+                    <div style="font-size:13.5px;font-weight:600">Vision</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-muted)">moondream</div>
+                  </div>
+                </div>
+                <div class="status-cell" style="color:var(--success);font-size:12px"><span class="status-dot ok" style="width:6px;height:6px"></span>Configured</div>
+              </div>
+              <div class="panel panel-pad">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                  <div class="node-icon" style="background:var(--border-subtle);color:var(--text-muted);width:32px;height:32px;border-radius:8px"><iconify-icon icon="lucide:file-edit"></iconify-icon></div>
+                  <div>
+                    <div style="font-size:13.5px;font-weight:600">Approval-Note LoRA</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-muted)">approval-note-lora</div>
+                  </div>
+                </div>
+                <div class="status-cell" style="color:var(--success);font-size:12px"><span class="status-dot ok" style="width:6px;height:6px"></span>Configured</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <span class="section-label">Routing Logic</span>
+            <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:0">
+              <div class="kv-row"><span class="k">File attached, image type</span><span class="v">→ Vision (moondream)</span></div>
+              <div class="kv-row"><span class="k">Approval-note style request</span><span class="v">→ Text + LoRA adapter</span></div>
+              <div class="kv-row"><span class="k">Everything else</span><span class="v">→ Text (qwen2.5:1.5b-instruct)</span></div>
+              <div class="kv-row" style="border-bottom:none"><span class="k">Inference Endpoint</span><span class="v">localhost:11434 (Ollama)</span></div>
+            </div>
+          </div>
+
+          <div>
+            <span class="section-label">Model Distribution (all logged tasks)</span>
+            <div class="panel panel-pad">
+              <div class="dist-bar" id="model-dist-bar-2"></div>
+              <div class="dist-legend" id="model-dist-legend-2"></div>
+            </div>
+          </div>
+
+          <p style="font-size:12px;color:var(--text-muted);max-width:560px">Model names and routing rules are fixed by contract §2.5 — this panel is read-only, reflecting configuration, not a control surface.</p>
+        </section>
+
+        <!-- Knowledge Base -->
+        <section id="tab-knowledge" style="flex-direction:column;gap:14px">
+          <span class="section-label">Knowledge Base</span>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:560px">The local document corpus Person C's <span class="mono">search-docs</span> tool searches against. Shown here as a reference shell — indexed document listing isn't yet exposed by the tools API.</p>
+          <div class="panel">
+            <div class="filter-row">
+              <div class="filter-left">
+                <div class="search-input"><iconify-icon icon="lucide:search"></iconify-icon><input id="kb-search" type="text" placeholder="Search documents…"></div>
+              </div>
+              <button class="export-btn" id="kb-add" disabled style="opacity:.5;cursor:not-allowed"><iconify-icon icon="lucide:upload"></iconify-icon>Add Document</button>
+            </div>
+            <table>
+              <thead>
+                <tr><th>Document</th><th>Source</th><th class="num">Chunks</th><th class="num">Last Indexed</th></tr>
+              </thead>
+              <tbody id="kb-tbody"></tbody>
+            </table>
+            <div class="table-empty" id="kb-empty" hidden>
+              <iconify-icon icon="lucide:search-x"></iconify-icon>
+              <span>No documents match your search.</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Audit Log (compliance view) -->
+        <section id="tab-audit" style="flex-direction:column;gap:14px">
+          <span class="section-label">Audit Log — Compliance View</span>
+          <div class="panel panel-pad" style="display:flex;gap:12px;align-items:flex-start">
+            <iconify-icon icon="lucide:link" style="color:var(--accent);font-size:18px;margin-top:1px;flex-shrink:0"></iconify-icon>
+            <p style="font-size:12.5px;color:var(--text-secondary);line-height:1.6;margin:0">Every entry stores a SHA-256 hash of the previous entry, forming a tamper-evident chain — altering or deleting a past record breaks every hash after it. This view shows entries in write order for that reason; use <a href="#activity" style="color:var(--accent)">Task Activity</a> for searching/filtering/exporting the same data.</p>
+          </div>
+          <div class="panel">
+            <table>
+              <thead>
+                <tr><th class="num">#</th><th>Task ID</th><th>User</th><th>Type</th><th>Model</th><th class="num">Timestamp</th></tr>
+              </thead>
+              <tbody id="compliance-tbody"></tbody>
+            </table>
+            <div class="table-empty" id="compliance-empty" hidden>
+              <iconify-icon icon="lucide:database-zap"></iconify-icon>
+              <span>No audit entries yet.</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- System Resources -->
+        <section id="tab-resources" style="flex-direction:column;gap:20px">
+          <span class="section-label">System Resources</span>
+          <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:0">
+            <div class="kv-row"><span class="k">GPU</span><span class="v">RTX 3050 (4GB VRAM)</span></div>
+            <div class="kv-row"><span class="k">Serving Runtime</span><span class="v">Ollama / llama.cpp (Q4 quantized)</span></div>
+            <div class="kv-row"><span class="k">Text Model Footprint</span><span class="v">~0.9–1.0 GB VRAM</span></div>
+            <div class="kv-row"><span class="k">Vision Model Footprint</span><span class="v">~1.7–1.8 GB VRAM</span></div>
+            <div class="kv-row"><span class="k">Max Concurrent Tasks</span><span class="v">2</span></div>
+            <div class="kv-row" style="border-bottom:none"><span class="k">Parallel Vision Tasks</span><span class="v">Queued, not parallel (by design)</span></div>
+          </div>
+          <p style="font-size:11.5px;color:var(--text-muted);max-width:600px">Reflects the fixed hardware-scaling decisions in MASTER_BUILD_GUIDE.md Part 1 — a deliberate, honest constraint of the demo hardware, not a live resource monitor. Live GPU/CPU telemetry isn't currently exposed by the backend.</p>
+        </section>
+
+        <!-- Security & Sovereignty -->
+        <section id="tab-sovereignty" style="flex-direction:column;gap:20px">
+          <span class="section-label">Architecture &amp; Data Sovereignty</span>
+          <div class="panel panel-pad" style="overflow-x:auto">
+            <div class="arch-diagram">
+              <div class="arch-node">
+                <div class="zone lan">LAN · Exposed</div>
+                <div class="name">User Browser</div>
+                <div class="desc">The only client ever on the network.</div>
+              </div>
+              <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
+              <div class="arch-node">
+                <div class="zone lan">Port 8000 · Only door in</div>
+                <div class="name">Backend / API &amp; Queue</div>
+                <div class="desc">Receives tasks, tracks status, serves this UI.</div>
+              </div>
+              <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
+              <div class="arch-node">
+                <div class="zone local">localhost only</div>
+                <div class="name">Agent Executor · :8002</div>
+                <div class="desc">Plan → act → observe loop.</div>
+              </div>
+              <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
+              <div class="arch-node">
+                <div class="zone local">localhost only</div>
+                <div class="name">Inference · :11434</div>
+                <div class="desc">Ollama — text, vision &amp; LoRA models.</div>
+              </div>
+              <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
+              <div class="arch-node">
+                <div class="zone local">localhost only</div>
+                <div class="name">Tools · :8001</div>
+                <div class="desc">Sandboxed code exec, doc search, file gen.</div>
+              </div>
+              <div class="arch-connector"><iconify-icon icon="lucide:x"></iconify-icon></div>
+              <div class="arch-node" style="border-style:dashed;opacity:.7">
+                <div class="zone" style="color:var(--error)">External network</div>
+                <div class="name">None</div>
+                <div class="desc">No hop in this system ever reaches the public internet.</div>
+              </div>
+            </div>
+          </div>
+          <div class="capability-row">
+            <div class="capability-badge"><iconify-icon icon="lucide:check-circle"></iconify-icon>Air-gapped inference</div>
+            <div class="capability-badge"><iconify-icon icon="lucide:check-circle"></iconify-icon>No external API calls</div>
+            <div class="capability-badge"><iconify-icon icon="lucide:check-circle"></iconify-icon>Hash-chained audit log</div>
+            <div class="capability-badge"><iconify-icon icon="lucide:check-circle"></iconify-icon>Single LAN-exposed port</div>
+          </div>
+          <p style="font-size:11.5px;color:var(--text-muted);max-width:600px">This diagram reflects the fixed architecture in MASTER_BUILD_GUIDE.md §2.1/§2.2. It is a static explainer, not a live network monitor — the backend does not currently expose live traffic metrics.</p>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+  <div class="demo-badge" id="admin-demo-badge" hidden>
+    <span class="dot"></span>Demo mode — showing illustrative data
+  </div>
+</div>
+
+<template id="audit-table-template">
+  <div class="panel">
+    <div class="filter-row">
+      <div class="filter-left">
+        <div class="search-input"><iconify-icon icon="lucide:search"></iconify-icon><input id="search-input" type="text" placeholder="Search task, user, model…"></div>
+        <select class="filter-select" id="filter-type"><option value="">All Types</option></select>
+        <select class="filter-select" id="filter-attachment">
+          <option value="">Any Attachment</option>
+          <option value="yes">With Attachment</option>
+          <option value="no">Without Attachment</option>
+        </select>
+      </div>
+      <button class="export-btn" id="export-log"><iconify-icon icon="lucide:download"></iconify-icon>Export CSV</button>
+    </div>
+    <div class="loading-bar" id="audit-loading"></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th data-sort="task_id">Task ID<iconify-icon icon="lucide:chevron-down" class="sort-glyph"></iconify-icon></th>
+            <th data-sort="user_id">User<iconify-icon icon="lucide:chevron-down" class="sort-glyph"></iconify-icon></th>
+            <th data-sort="task_type">Type<iconify-icon icon="lucide:chevron-down" class="sort-glyph"></iconify-icon></th>
+            <th>Model</th>
+            <th>Attachment</th>
+            <th class="num" data-sort="timestamp">Timestamp<iconify-icon icon="lucide:chevron-down" class="sort-glyph"></iconify-icon></th>
+          </tr>
+        </thead>
+        <tbody id="audit-tbody"></tbody>
+      </table>
+      <div class="table-empty" id="audit-empty" hidden>
+        <iconify-icon icon="lucide:database-zap"></iconify-icon>
+        <span>No records match the current filters.</span>
+        <button id="reset-filters">Reset filters</button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script src="app.js"></script>
+<script>
+  AdminAuth.guard(); // redirects to admin-login.html immediately if no active admin session
+  document.getElementById('admin-logout').addEventListener('click', (e) => {
+    e.preventDefault();
+    AdminAuth.endSession();
+    location.href = 'admin-login.html';
+  });
+  // Mount the single interactive audit-table component permanently into Task Activity.
+  const tpl = document.getElementById('audit-table-template');
+  document.getElementById('audit-table-panel').appendChild(tpl.content.cloneNode(true));
+</script>
+<script src="admin.js"></script>
+</body>
+</html>

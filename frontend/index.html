@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sovereign AI Workbench</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="mark"><iconify-icon icon="lucide:shield-check"></iconify-icon></div>
+      <span class="name">Sovereign</span>
+    </div>
+    <a href="#" id="nav-new-task" class="sidebar-new-task">
+      <iconify-icon icon="lucide:plus"></iconify-icon><span>New Task</span>
+    </a>
+
+    <div class="sidebar-nav custom-scroll">
+      <div class="sidebar-section-label">Tasks</div>
+      <div id="task-sidebar-list" class="task-sidebar-list"></div>
+      <div id="task-sidebar-empty" class="task-sidebar-empty" hidden>
+        <iconify-icon icon="lucide:message-square-dashed"></iconify-icon>
+        <span>Your tasks will appear here</span>
+      </div>
+
+      <div class="sidebar-section-label">Files &amp; Deliverables</div>
+      <div id="files-sidebar-list" class="task-sidebar-list"></div>
+      <div id="files-sidebar-empty" class="task-sidebar-empty" hidden>
+        <iconify-icon icon="lucide:folder-open"></iconify-icon>
+        <span>Generated files will appear here</span>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <div class="gradient-picker" id="gradient-picker">
+        <button class="gradient-picker-toggle" id="gradient-picker-toggle" title="Accent color">
+          <iconify-icon icon="lucide:palette"></iconify-icon>
+        </button>
+        <div class="gradient-picker-pop" id="gradient-picker-pop" hidden>
+          <div class="gradient-picker-label">Gradient color</div>
+          <div class="gradient-swatch-row" id="gradient-swatch-row"></div>
+        </div>
+      </div>
+      <div class="sidebar-user">
+        <div class="avatar"><iconify-icon icon="lucide:user"></iconify-icon></div>
+        <div class="who"><div class="n">Operator</div><div class="id mono" id="sidebar-user-id"></div></div>
+      </div>
+      <a href="admin-login.html" class="admin-switch-link">
+        <iconify-icon icon="lucide:shield"></iconify-icon><span>Switch to Admin</span>
+      </a>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main" id="main-view">
+    <div class="hero-gradient"></div>
+
+    <header class="topbar">
+      <div class="topbar-left">
+        <span id="topbar-task-title">Workspace</span>
+        <span class="mono task-id" id="topbar-task-id"></span>
+      </div>
+      <div class="topbar-right">
+        <div class="notif-wrap">
+          <button class="icon-btn" id="notif-bell" title="Notify me when tasks finish">
+            <iconify-icon icon="lucide:bell"></iconify-icon>
+          </button>
+          <div class="notif-pop" id="notif-pop" hidden></div>
+        </div>
+        <button class="icon-btn" data-theme-toggle title="Toggle theme">
+          <iconify-icon data-icon-sun icon="lucide:sun"></iconify-icon>
+          <iconify-icon data-icon-moon icon="lucide:moon" class="hidden"></iconify-icon>
+        </button>
+        <a href="#" id="maximize-activity" class="icon-btn" title="Maximize execution graph">
+          <iconify-icon icon="lucide:maximize-2"></iconify-icon>
+        </a>
+      </div>
+    </header>
+
+    <!-- Idle / empty state: composer centered as the primary focal point -->
+    <div id="idle-view" class="idle-view">
+      <div class="idle-inner">
+        <div class="greet">Hi, Operator 👋</div>
+        <h1>What are we building today?</h1>
+        <div class="composer-bar composer-bar--centered">
+          <button class="composer-btn" id="composer-attach-idle" title="Attach a file"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <input id="composer-input-idle" type="text" placeholder="Describe the task, or attach a document...">
+          <button class="composer-btn composer-send" id="composer-send-idle" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
+        </div>
+        <div class="file-preview" id="file-preview-idle">
+          <iconify-icon icon="lucide:paperclip"></iconify-icon><span class="name"></span>
+          <button title="Remove"><iconify-icon icon="lucide:x"></iconify-icon></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active conversation state -->
+    <div id="conversation-scroll" class="conversation-scroll custom-scroll" hidden>
+      <div id="conversation-inner" class="conversation-inner"></div>
+    </div>
+
+    <div class="composer-dock" id="composer-dock" hidden>
+      <div class="composer-inner">
+        <div id="live-strip" class="live-strip"></div>
+        <div class="composer-bar">
+          <button class="composer-btn" id="composer-attach" title="Attach a file"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <input id="composer-input" type="text" placeholder="Describe the task, or attach a document...">
+          <button class="composer-btn composer-send" id="composer-send" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
+        </div>
+        <div class="file-preview" id="file-preview">
+          <iconify-icon icon="lucide:paperclip"></iconify-icon><span class="name"></span>
+          <button title="Remove"><iconify-icon icon="lucide:x"></iconify-icon></button>
+        </div>
+      </div>
+    </div>
+
+    <input type="file" id="file-input">
+  </main>
+
+  <!-- Maximized execution graph overlay -->
+  <div class="graph-overlay" id="graph-overlay">
+    <div class="hero-gradient"></div>
+    <header class="graph-header">
+      <div class="graph-header-left">
+        <button class="icon-btn" id="graph-close" title="Close"><iconify-icon icon="lucide:arrow-left"></iconify-icon></button>
+        <div class="divider"></div>
+        <div>
+          <div class="title">Agent Execution Graph</div>
+          <div class="subtitle mono" id="graph-subtitle">No active task</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button class="icon-btn" data-theme-toggle title="Toggle theme">
+          <iconify-icon data-icon-sun icon="lucide:sun"></iconify-icon>
+          <iconify-icon data-icon-moon icon="lucide:moon" class="hidden"></iconify-icon>
+        </button>
+      </div>
+    </header>
+    <div class="graph-canvas custom-scroll" id="graph-canvas"></div>
+    <footer class="graph-footer">
+      <span class="mono" id="graph-footer-task">TASK: —</span>
+      <span class="sovereign"><iconify-icon icon="lucide:shield-check"></iconify-icon>System Sovereign</span>
+    </footer>
+  </div>
+
+  <!-- Detail drawer -->
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+  <aside class="drawer" id="drawer">
+    <div class="drawer-header">
+      <div>
+        <h2 id="drawer-title">Stage Details</h2>
+        <span class="status-pill pending" id="drawer-status">PENDING</span>
+      </div>
+      <button class="icon-btn" id="drawer-close"><iconify-icon icon="lucide:x"></iconify-icon></button>
+    </div>
+    <div class="drawer-body custom-scroll" id="drawer-body"></div>
+  </aside>
+
+  <div class="demo-badge" id="demo-badge" hidden>
+    <span class="dot"></span>Demo mode — backend not detected
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script src="user.js"></script>
+<script>
+  document.getElementById('sidebar-user-id').textContent = Store.USER_ID;
+</script>
+</body>
+</html>
