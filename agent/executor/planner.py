@@ -72,6 +72,7 @@ from typing import Literal, Optional
 
 from executor.state import TaskState
 from router.model_registry import TEXT_MODEL, VISION_MODEL, LORA_ADAPTER, is_approval_note_request
+from router.classifier import FILE_FORMAT_KEYWORDS
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
 ToolName = Literal["execute_code", "search_docs", "generate_file"]
@@ -99,6 +100,7 @@ FILEGEN_CONTENT_MARKER = "__FILEGEN_CONTENT__"
 # "this is the code-execution codegen stage" from "this is the
 # document-generation codegen stage" at the two call sites that check it.
 CODEEXEC_CODE_MARKER = FILEGEN_CODE_MARKER
+
 
 # Heuristic keywords indicating the file-generation request needs real
 # computed/verified data rather than free-form prose — in which case F
@@ -338,6 +340,62 @@ def _parse_structured_content(text: str) -> Optional[dict]:
     return None
 
 
+def _strip_file_format_phrase(prompt: str) -> str:
+    """
+    Trims a trailing file-format ask (e.g. ", save it as a word document")
+    off the user's prompt before it reaches the approval-note LoRA adapter.
+    The adapter was trained only on plain finding-description phrasing
+    (never asked to "save as a document"), so document-generation and
+    text-generation requests for the same underlying request must reach it
+    with the same core wording — otherwise the unfamiliar file-format
+    phrasing drifts it into conversational preamble/postamble instead of
+    its trained approval-note format.
+    """
+    lowered = prompt.lower()
+    cut = len(prompt)
+    for kw in FILE_FORMAT_KEYWORDS:
+        idx = lowered.find(kw)
+        if idx != -1:
+            cut = min(cut, idx)
+    trimmed = prompt[:cut].rstrip(" ,.-—")
+    return trimmed or prompt
+
+
+def _approval_note_text_to_file_content(raw_text: str) -> dict:
+    """
+    Converts the LoRA adapter's own trained free-text approval-note format
+    (e.g. "APPROVAL NOTE\n\nSubject: ...\n\nFindings:\n...\n\nRecommendation:
+    \n...\n\nApproval Status: ...") into the {"title","sections"} shape
+    generate_file needs — without asking the model to reinvent the
+    structure as JSON. The adapter was never trained to emit JSON, so
+    re-prompting it for that schema pushes it off-distribution and produces
+    inconsistent results; parsing its real, trained-format output in code
+    instead keeps the docx in the exact same approval-note structure
+    (Subject / Date / Findings / Recommendation / Approval Status /
+    Signature, etc.) as the plain-text answer for the same kind of request.
+    """
+    blocks = [b.strip() for b in raw_text.strip().split("\n\n") if b.strip()]
+    if not blocks:
+        return {"title": "Approval Note", "sections": [{"heading": "", "body": raw_text.strip()}]}
+
+    title = blocks[0].splitlines()[0].strip() or "Approval Note"
+    sections = []
+    for block in blocks[1:]:
+        lines = block.splitlines()
+        first = lines[0].strip()
+        if first.endswith(":") and len(lines) > 1:
+            heading, body = first[:-1].strip(), "\n".join(lines[1:]).strip()
+        elif ":" in first and len(lines) == 1 and len(first) < 60:
+            heading, body = (p.strip() for p in first.split(":", 1))
+        else:
+            heading, body = "", block
+        sections.append({"heading": heading, "body": body})
+
+    if not sections:
+        sections = [{"heading": "", "body": raw_text.strip()}]
+    return {"title": title, "sections": sections}
+
+
 def _is_valid_file_content(obj) -> bool:
     return (
         isinstance(obj, dict)
@@ -476,10 +534,26 @@ def decide_next_step(state: TaskState) -> NextStep:
                     model=filegen_model,
                     prompt=FILEGEN_CODE_MARKER + _build_filegen_code_prompt(state.prompt),
                 )
+            if filegen_model == LORA_ADAPTER:
+                # The adapter is trained to write approval notes directly in
+                # its own free-text format, not Person C's generic FileContent
+                # JSON — asking it for JSON here would push it off the
+                # distribution it was trained on. Call it plainly, as trained,
+                # and turn its real output into sections in code afterwards
+                # (see _approval_note_text_to_file_content in the replan step
+                # below) instead of re-prompting it to invent a schema.
+                print(
+                    f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={LORA_ADAPTER} "
+                    f"(filegen: approval-note LoRA adapter, called in its trained free-text format)"
+                )
+                return NextStep(
+                    action="call_qwen",
+                    model=LORA_ADAPTER,
+                    prompt=FILEGEN_CONTENT_MARKER + _strip_file_format_phrase(state.prompt),
+                )
             print(
                 f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={filegen_model} "
-                f"(filegen: content-preparation stage"
-                f"{', using approval-note LoRA adapter' if filegen_model == LORA_ADAPTER else ''})"
+                f"(filegen: content-preparation stage)"
             )
             return NextStep(
                 action="call_qwen",
@@ -487,13 +561,24 @@ def decide_next_step(state: TaskState) -> NextStep:
                 prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, None),
             )
 
-        # text-generation (default) -> single Qwen call
-        text_model = _text_model(state.prompt)
-        print(
-            f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={text_model} "
-            f"(text entry point{', using approval-note LoRA adapter' if text_model == LORA_ADAPTER else ''})"
-        )
-        return NextStep(action="call_qwen", model=text_model, prompt=state.prompt)
+        # text-generation (default).
+        # An approval-note-flavored request uses the same LoRA adapter as
+        # the document-generation flow, called the same trained way (plain
+        # prompt, no forced JSON schema) — so a text-only answer is in the
+        # exact same approval-note format (Subject / Findings /
+        # Recommendation / Approval Status / ...) that a docx of the same
+        # kind of request would carry, just delivered as plain text instead
+        # of written to a file. Anything else keeps the original single
+        # free-form Qwen call.
+        if is_approval_note_request(state.prompt) and LORA_ADAPTER:
+            print(
+                f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={LORA_ADAPTER} "
+                f"(text entry point: approval-note LoRA adapter, called in its trained format)"
+            )
+            return NextStep(action="call_qwen", model=LORA_ADAPTER, prompt=state.prompt)
+
+        print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={TEXT_MODEL} (text entry point)")
+        return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=state.prompt)
 
     # --- Step 1+: replan based on what happened last ---
     last = state.step_records[-1]
@@ -565,13 +650,20 @@ def decide_next_step(state: TaskState) -> NextStep:
             )
 
         if state.task_type == "document-generation" and (last.prompt_used or "").startswith(FILEGEN_CONTENT_MARKER):
-            content = _parse_structured_content(str(last.observation))
-            if not _is_valid_file_content(content):
-                print(
-                    f"[PLANNER] task_id={state.task_id} filegen content-prep returned invalid JSON "
-                    f"-> falling back to raw-prompt content"
-                )
-                content = _build_generate_file_args(state.prompt)["content"]
+            if last.model_used == LORA_ADAPTER:
+                # Adapter output is its own trained free-text approval-note
+                # format, not JSON — parse it in code (see
+                # _approval_note_text_to_file_content) instead of trying to
+                # decode it as the generic filegen JSON schema.
+                content = _approval_note_text_to_file_content(str(last.observation))
+            else:
+                content = _parse_structured_content(str(last.observation))
+                if not _is_valid_file_content(content):
+                    print(
+                        f"[PLANNER] task_id={state.task_id} filegen content-prep returned invalid JSON "
+                        f"-> falling back to raw-prompt content"
+                    )
+                    content = _build_generate_file_args(state.prompt)["content"]
             state.prepared_file_content = content
             file_type = state.file_type or _detect_file_type(state.prompt)
             print(

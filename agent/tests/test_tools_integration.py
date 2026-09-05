@@ -75,17 +75,19 @@ async def test_document_generation_flow_prepares_content_via_qwen_before_generat
         file_base64=None,
         file_mime_type=None,
     )
-    prepared_content = {
-        "title": "Approval Note: Vessel V-101 Wall Loss Finding",
-        "sections": [
-            {"heading": "Finding", "body": "Wall loss identified on vessel V-101."},
-            {"heading": "Approval", "body": "Recommended for approval pending inspection."},
-        ],
-    }
+    # This is an approval-note request, so content-prep runs through Person
+    # A's LoRA adapter, called in its own trained free-text format (never
+    # asked to emit JSON) — the loop parses that real output into sections
+    # in code (see planner._approval_note_text_to_file_content).
+    lora_raw_output = (
+        "Approval Note: Vessel V-101 Wall Loss Finding\n\n"
+        "Finding:\nWall loss identified on vessel V-101.\n\n"
+        "Approval:\nRecommended for approval pending inspection."
+    )
     tool_result = {"file_url": "/files/abc123-approval-note.docx", "file_name": "abc123-approval-note.docx"}
 
     with patch("executor.loop.generate_file", new=AsyncMock(return_value=tool_result)) as mocked_tool, \
-         patch("executor.loop.call_inference", new=AsyncMock(return_value=json.dumps(prepared_content))) as mocked_infer:
+         patch("executor.loop.call_inference", new=AsyncMock(return_value=lora_raw_output)) as mocked_infer:
         resp = await run_agent_loop(req)
 
     assert resp.status == "completed"
@@ -102,9 +104,13 @@ async def test_document_generation_flow_prepares_content_via_qwen_before_generat
 
     mocked_tool.assert_awaited_once()
     assert mocked_tool.call_args.kwargs["file_type"] == "docx"
-    # The raw user prompt must NOT be what lands in the file — the prepared
-    # structured content must be used instead.
-    assert mocked_tool.call_args.kwargs["content"] == prepared_content
+    # The raw user prompt must NOT be what lands in the file — content
+    # parsed from the adapter's real trained-format output must be used
+    # instead, preserving that same structure (title + labeled sections).
+    sent_content = mocked_tool.call_args.kwargs["content"]
+    assert sent_content["title"] == "Approval Note: Vessel V-101 Wall Loss Finding"
+    assert {"heading": "Finding", "body": "Wall loss identified on vessel V-101."} in sent_content["sections"]
+    assert {"heading": "Approval", "body": "Recommended for approval pending inspection."} in sent_content["sections"]
 
 
 @pytest.mark.asyncio
