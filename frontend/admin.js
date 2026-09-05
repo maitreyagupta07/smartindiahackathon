@@ -121,34 +121,70 @@ function renderComplianceView(entries) {
   `).join('');
 }
 
-/* Knowledge Base — illustrative shell only; the tools API doesn't yet expose
-   an indexed-document listing, so this is clearly a UI component ready to be
-   wired up rather than real data. */
-const KB_DOCS = [
-  { name: 'Hot Work Permit SOP.pdf', source: 'sop.txt', chunks: 42, indexed: '2026-08-30' },
-  { name: 'Vessel Inspection Manual v3.pdf', source: 'manual.txt', chunks: 118, indexed: '2026-08-30' },
-  { name: 'CUI Inspection Guidelines.pdf', source: 'sop.txt', chunks: 27, indexed: '2026-08-28' },
-  { name: 'Approval Note Templates.docx', source: 'templates.txt', chunks: 9, indexed: '2026-08-25' },
-];
+/* Knowledge Base — live data. Documents uploaded through a chat are ingested
+   into the Tools service's ChromaDB (tagged with their chat_id) and listed
+   here via GET /api/knowledge-base. No separate upload here: the chat upload
+   is the ingestion action, this is the management/viewing surface. */
+let KB_DOCS = [];
+
+function fmtDateOnly(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+async function loadKnowledgeBase() {
+  const searchEl = document.getElementById('kb-search');
+  try {
+    const live = await Api.probe();
+    if (live) {
+      const data = await Api.getKnowledgeBase();
+      KB_DOCS = data.documents || [];
+    } else {
+      KB_DOCS = demoKbDocs();
+    }
+  } catch (err) {
+    KB_DOCS = [];
+    toast(`Couldn't load Knowledge Base: ${err.message}`, true);
+  }
+  renderKnowledgeBase(searchEl ? searchEl.value : '');
+}
+
+function demoKbDocs() {
+  return [
+    { filename: 'research.pdf', file_type: 'pdf', status: 'indexed', chat_title: 'Research Discussion', chat_id: 'demo-a', chunks: 24, uploaded_at: new Date(Date.now() - 3600_000).toISOString() },
+    { filename: 'paper.pdf', file_type: 'pdf', status: 'indexed', chat_title: 'Project Discussion', chat_id: 'demo-b', chunks: 11, uploaded_at: new Date(Date.now() - 7200_000).toISOString() },
+  ];
+}
+
 function renderKnowledgeBase(query = '') {
   const tbody = document.getElementById('kb-tbody');
   const emptyEl = document.getElementById('kb-empty');
   const q = query.trim().toLowerCase();
-  const rows = KB_DOCS.filter((d) => !q || d.name.toLowerCase().includes(q) || d.source.toLowerCase().includes(q));
+  const rows = KB_DOCS.filter((d) => {
+    if (!q) return true;
+    return `${d.filename || ''} ${d.chat_title || ''} ${d.chat_id || ''}`.toLowerCase().includes(q);
+  });
   if (rows.length === 0) {
     tbody.innerHTML = '';
     emptyEl.hidden = false;
     return;
   }
   emptyEl.hidden = true;
-  tbody.innerHTML = rows.map((d) => `
+  tbody.innerHTML = rows.map((d) => {
+    const chat = d.chat_title || (d.chat_id ? d.chat_id.slice(0, 8) : '—');
+    const status = (d.status || 'indexed').toLowerCase();
+    const statusClass = status === 'indexed' ? 'ok' : status === 'failed' ? 'err' : 'pending';
+    return `
     <tr>
-      <td><div class="status-cell"><iconify-icon icon="lucide:file-text" style="font-size:14px;color:var(--text-muted)"></iconify-icon>${escapeHtml(d.name)}</div></td>
-      <td class="mono">${escapeHtml(d.source)}</td>
-      <td class="num">${d.chunks}</td>
-      <td class="num">${escapeHtml(d.indexed)}</td>
-    </tr>
-  `).join('');
+      <td><div class="status-cell"><iconify-icon icon="lucide:file-text" style="font-size:14px;color:var(--text-muted)"></iconify-icon>${escapeHtml(d.filename || 'unknown')}</div></td>
+      <td class="mono">${escapeHtml((d.file_type || 'pdf').toUpperCase())}</td>
+      <td><span class="status-cell" style="color:var(--text-secondary)"><span class="status-dot ${statusClass}"></span>${escapeHtml(status.charAt(0).toUpperCase() + status.slice(1))}</span></td>
+      <td>${escapeHtml(chat)}</td>
+      <td class="num">${d.chunks != null ? d.chunks : '—'}</td>
+      <td class="num">${escapeHtml(fmtDateOnly(d.uploaded_at))}</td>
+    </tr>`;
+  }).join('');
 }
 
 function populateTypeFilter(entries) {
@@ -310,8 +346,12 @@ function initTableControls() {
 }
 
 function initKnowledgeBase() {
-  renderKnowledgeBase();
   document.getElementById('kb-search').addEventListener('input', (e) => renderKnowledgeBase(e.target.value));
+  // Re-fetch whenever the Knowledge Base tab is opened, so a PDF just added
+  // from a chat shows up without a full page reload.
+  const kbNav = document.querySelector('.nav-item[data-tab="knowledge"]');
+  if (kbNav) kbNav.addEventListener('click', () => loadKnowledgeBase());
+  loadKnowledgeBase();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

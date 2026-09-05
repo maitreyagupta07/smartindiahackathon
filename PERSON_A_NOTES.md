@@ -5,6 +5,26 @@ Not part of the contract — just a scratch list so nothing discussed gets lost.
 ## In progress
 - [ ] PDF / scanned-report ingestion for approval-note requests (started — see below)
 
+## Resolved — classifier rewrite (2026-09-06)
+The "ambiguous phrasing confuses the docx content" concern below turned out
+to be a real, specific bug: `_strip_file_format_phrase()` cut from the FIRST
+matched file-format keyword to the END of the string, which only works when
+that phrase trails the sentence. "make a word doc **of** approval note of
+leak in vessel B2" has it up front, so stripping "cut to the end" threw away
+almost the whole prompt. Fixed by removing only the matched phrase itself
+(longest-match-first, since FILE_FORMAT_KEYWORDS has overlapping entries
+like "word doc" inside "word document") wherever it sits, not everything
+after it. Also rewrote router/classifier.py from flat substring keyword
+matching to weighted multi-signal scoring (phrase signals + weak/strong word
+tiers + a confidence threshold before accepting any non-default
+classification + multi-step/workflow detection) — see its module docstring
+for the full design. Verified via `agent/tests/test_classifier_signals.py`
+(24 new tests) plus live runs of both the bug's exact repro prompt and the
+two priority prompts from that task. Still true and worth re-checking
+periodically: LoRA docx *content* itself remains stochastic (dates/specifics
+vary or show as placeholders run to run) — that's the model, not routing,
+and is a separate, already-known concern (see PERSON_A_NOTES.md history).
+
 ## Ideas not yet started
 - [ ] Second small LoRA adapter for another recurring document type (e.g. shift
       handover note, maintenance work order) — reuse the existing Unsloth ->

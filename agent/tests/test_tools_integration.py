@@ -221,9 +221,16 @@ async def test_tool_failure_retries_then_finalizes_with_error():
         file_base64=None,
         file_mime_type=None,
     )
+    # Person F's code-execution flow now generates Python via Qwen BEFORE
+    # ever calling execute_code (added after this test was written) — that
+    # call_inference must be mocked too, or this test hangs on a real
+    # network call to config.json's inference_host instead of testing the
+    # execute_code retry behavior it's actually meant to test.
     with patch(
         "executor.loop.execute_code", new=AsyncMock(side_effect=RuntimeError("docker unavailable"))
-    ) as mocked_tool:
+    ) as mocked_tool, patch(
+        "executor.loop.call_inference", new=AsyncMock(return_value="```python\nprint(5 * 5)\n```")
+    ):
         resp = await run_agent_loop(req)
 
     assert resp.status == "failed"

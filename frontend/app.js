@@ -65,6 +65,46 @@ const Api = {
     return res.json(); // { entries: [...] }
   },
 
+  /* ---- Chat-scoped Knowledge Base + conversational context (§ chat API) ---- */
+
+  /** Ingest a PDF into one chat's Knowledge Base. The chat upload IS the
+   *  ingestion action — no separate Admin step. */
+  async chatUpload(chatId, { user_id, file_base64, file_name, file_mime_type = null, chat_title = null }) {
+    const res = await fetch(`${API_BASE}/api/chat/${encodeURIComponent(chatId)}/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id, file_base64, file_name, file_mime_type, chat_title }),
+    });
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `upload failed (${res.status})`);
+    return body; // { success, document_id, filename, chat_id, status, chunks }
+  },
+
+  /** Ask a question in a chat. Server keeps recent conversation context and
+   *  retrieves only THIS chat's uploaded documents. */
+  async chatMessage(chatId, { user_id, prompt, chat_title = null }) {
+    const res = await fetch(`${API_BASE}/api/chat/${encodeURIComponent(chatId)}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id, prompt, chat_title }),
+    });
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `message failed (${res.status})`);
+    return body; // { task_id, status, chat_id }
+  },
+
+  async getKnowledgeBase(chatId = null) {
+    const url = chatId
+      ? `${API_BASE}/api/knowledge-base?chat_id=${encodeURIComponent(chatId)}`
+      : `${API_BASE}/api/knowledge-base`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(body.error || `knowledge-base failed (${res.status})`);
+    }
+    return res.json(); // { documents: [...] }
+  },
+
   /** Probe the real backend once, briefly, so the UI can honestly signal live-vs-demo mode. */
   async probe(timeoutMs = 1500) {
     try {
@@ -105,6 +145,36 @@ const Store = {
       tasks[idx] = { ...tasks[idx], ...patch };
       localStorage.setItem(Store.key(userId), JSON.stringify(tasks));
     }
+  },
+
+  /* ---- Chats (multi-turn). The chat_id is generated client-side and is the
+     isolation key: it is sent on every upload and every message, and switching
+     chats switches it. Conversation turns are cached here per browser for
+     resume; the server keeps the authoritative recent context. ---- */
+  chatsKey(userId = Store.USER_ID) { return `sovereign-chats:${userId}`; },
+  chatMsgsKey(chatId, userId = Store.USER_ID) { return `sovereign-chat-msgs:${userId}:${chatId}`; },
+  newChatId() {
+    return (crypto && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : 'chat-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+  },
+  getChats(userId = Store.USER_ID) {
+    try { return JSON.parse(localStorage.getItem(Store.chatsKey(userId)) || '[]'); }
+    catch { return []; }
+  },
+  upsertChat(chat, userId = Store.USER_ID) {
+    const chats = Store.getChats(userId);
+    const idx = chats.findIndex((c) => c.chat_id === chat.chat_id);
+    if (idx === -1) chats.unshift(chat);
+    else chats[idx] = { ...chats[idx], ...chat };
+    localStorage.setItem(Store.chatsKey(userId), JSON.stringify(chats.slice(0, 50)));
+  },
+  getChatMessages(chatId, userId = Store.USER_ID) {
+    try { return JSON.parse(localStorage.getItem(Store.chatMsgsKey(chatId, userId)) || '[]'); }
+    catch { return []; }
+  },
+  saveChatMessages(chatId, messages, userId = Store.USER_ID) {
+    localStorage.setItem(Store.chatMsgsKey(chatId, userId), JSON.stringify(messages.slice(-200)));
   },
 };
 

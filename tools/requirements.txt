@@ -7,3 +7,12 @@ openpyxl==3.1.5
 python-pptx==0.6.23
 docker==7.1.0
 python-dotenv==1.0.1
+
+# Chat-scoped Knowledge Base PDF ingestion (app/pdf_ingest.py). Pure pip
+# packages, fully offline. pytesseract additionally needs the system
+# `tesseract-ocr` binary for the scanned-PDF OCR fallback; without it a
+# text-layer PDF still ingests fine, a scanned-only one reports cleanly.
+pdfplumber==0.11.4
+pymupdf==1.24.11
+pytesseract==0.3.13
+Pillow==10.4.0

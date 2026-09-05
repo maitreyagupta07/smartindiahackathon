@@ -36,6 +36,14 @@ class TaskState:
     task_type: str | None = None
     needs_reasoning: bool = False
 
+    # Chat-flow inputs (set only when the request carried a chat_id).
+    # history: recent [{"role": "user"|"assistant", "content": str}, ...]
+    # sources: filled in by the planner from the chat-scoped KB retrieval so
+    #          the final response can cite filename/page.
+    chat_id: str | None = None
+    history: list | None = None
+    sources: list | None = None
+
     # last model actually called — kept for the contract's top-level
     # `model_used` field (§2.4). For multi-model chains this is the model
     # of the FINAL step, since that's what actually produced the answer.

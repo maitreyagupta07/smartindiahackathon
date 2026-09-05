@@ -380,25 +380,51 @@ def _build_lora_prompt(state: TaskState, base_prompt: str) -> str:
     return f"{base_prompt}\n\nInspection report content:\n{extracted}"
 
 
+_FILE_FORMAT_TRAILING_FILLER_RE = re.compile(r"^\s*(of|for|about|as a|as an|in)\b", re.IGNORECASE)
+_FILE_FORMAT_LEADING_FILLER_RE = re.compile(r"\b(as a|as an|in)\s*$", re.IGNORECASE)
+
+
 def _strip_file_format_phrase(prompt: str) -> str:
     """
-    Trims a trailing file-format ask (e.g. ", save it as a word document")
-    off the user's prompt before it reaches the approval-note LoRA adapter.
-    The adapter was trained only on plain finding-description phrasing
-    (never asked to "save as a document"), so document-generation and
-    text-generation requests for the same underlying request must reach it
-    with the same core wording — otherwise the unfamiliar file-format
-    phrasing drifts it into conversational preamble/postamble instead of
-    its trained approval-note format.
+    Removes a file-format ask (e.g. "save it as a word document", or
+    "word doc" sitting at the FRONT of the sentence — e.g. "make a word doc
+    of approval note of leak in vessel B2") from the user's prompt before it
+    reaches the approval-note LoRA adapter. The adapter was trained only on
+    plain finding-description phrasing (never asked to "save as a
+    document"), so document-generation and text-generation requests for the
+    same underlying request must reach it with the same core wording —
+    otherwise the unfamiliar file-format phrasing drifts it into
+    conversational preamble/postamble instead of its trained format.
+
+    Earlier versions of this function found the FIRST matching keyword and
+    cut everything from there to the end of the string — correct only when
+    the file-format phrase trails the sentence ("...as a word document").
+    When it sits at the front or middle instead, that truncated away the
+    actual content along with it. This version removes only the matched
+    phrase itself (plus one leftover connecting word right after it, e.g.
+    "of"/"for"), wherever in the sentence it sits, leaving the rest intact.
     """
     lowered = prompt.lower()
-    cut = len(prompt)
-    for kw in FILE_FORMAT_KEYWORDS:
+    # Longest-first: FILE_FORMAT_KEYWORDS has overlapping entries (e.g.
+    # "word doc" is a literal substring of "word document") — matching the
+    # shortest one first would chop only part of the actual phrase and
+    # leave a stray fragment ("...as a ument") behind.
+    for kw in sorted(FILE_FORMAT_KEYWORDS, key=len, reverse=True):
         idx = lowered.find(kw)
-        if idx != -1:
-            cut = min(cut, idx)
-    trimmed = prompt[:cut].rstrip(" ,.-—")
-    return trimmed or prompt
+        if idx == -1:
+            continue
+        before = prompt[:idx]
+        after = prompt[idx + len(kw):]
+        # Drop one leftover connector immediately after the phrase (e.g.
+        # "word doc OF approval note...") and immediately before it (e.g.
+        # "save it AS A word document") — whichever side it fell on.
+        after = _FILE_FORMAT_TRAILING_FILLER_RE.sub("", after, count=1).lstrip()
+        before = _FILE_FORMAT_LEADING_FILLER_RE.sub("", before).rstrip(" ,.-—")
+        # Keep sentence-ending punctuation attached without an extra space.
+        joiner = "" if (after and after[0] in ",.!?") else (" " if after else "")
+        result = (before + joiner + after).strip(" ,")
+        return result or prompt
+    return prompt
 
 
 def strip_markdown_emphasis(text: str) -> str:
@@ -524,6 +550,76 @@ def _build_docsearch_prompt(original_prompt: str, tool_observation: dict) -> str
     )
 
 
+def _format_history(history: Optional[list]) -> str:
+    """Render recent conversation turns as `User:` / `Assistant:` lines."""
+    lines = []
+    for msg in history or []:
+        if not isinstance(msg, dict):
+            continue
+        role = "Assistant" if msg.get("role") == "assistant" else "User"
+        content = str(msg.get("content", "")).strip()
+        if content:
+            lines.append(f"{role}: {content}")
+    return "\n".join(lines).strip()
+
+
+def _build_chat_prompt(question: str, history: Optional[list], tool_observation: dict) -> str:
+    """
+    Assembles the chat-flow prompt for Qwen:
+
+        SYSTEM instructions
+        RELEVANT KNOWLEDGE BASE   (chat-scoped retrieved chunks, with source/page)
+        RECENT CONVERSATION       (last few User/Assistant turns)
+        CURRENT QUESTION
+
+    So a follow-up like "why would they benefit from it?" can resolve "they"
+    and "it" against the earlier turns, grounded in this chat's own uploads.
+    """
+    results = (tool_observation or {}).get("results", []) or []
+    if results:
+        kb_block = "\n\n".join(
+            "[{src}{page}]\n{body}".format(
+                src=r.get("source", "document"),
+                page=f", page {r['page']}" if r.get("page") else "",
+                body=r.get("text", ""),
+            )
+            for r in results
+        )
+    else:
+        kb_block = "(no relevant passages found in this chat's uploaded documents)"
+
+    convo = _format_history(history) or "(no earlier conversation in this chat)"
+
+    return (
+        "You are an assistant answering questions using the user's uploaded "
+        "Knowledge Base and the conversation so far in this chat. Use the "
+        "recent conversation to resolve references such as \"it\", \"they\", "
+        "\"this\", or \"that\". Prefer the Knowledge Base passages for facts; "
+        "if they do not contain the answer, say so plainly instead of "
+        "guessing.\n\n"
+        f"RELEVANT KNOWLEDGE BASE:\n{kb_block}\n\n"
+        f"RECENT CONVERSATION:\n{convo}\n\n"
+        f"CURRENT QUESTION:\n{question}"
+    )
+
+
+def _sources_from_results(tool_observation: dict) -> list[dict]:
+    """De-duplicated [{filename, page, score}] for the chat response's `sources`."""
+    seen: set = set()
+    out: list[dict] = []
+    for r in (tool_observation or {}).get("results", []) or []:
+        key = (r.get("source"), r.get("page"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "filename": r.get("source"),
+            "page": r.get("page"),
+            "score": r.get("score"),
+        })
+    return out
+
+
 def _tool_attempt_count(state: TaskState, tool_name: str) -> int:
     return sum(
         1 for r in state.step_records
@@ -576,6 +672,20 @@ def decide_next_step(state: TaskState) -> NextStep:
                 action="call_tool",
                 tool_name="search_docs",
                 tool_args={"query": state.prompt, "top_k": 3},
+            )
+
+        if state.task_type == "chat":
+            # Chat flow: retrieve from THIS chat's Knowledge Base only
+            # (chat_id filter enforced by the tools service), then answer
+            # with the retrieved chunks + recent conversation context.
+            print(
+                f"[PLANNER] task_id={state.task_id} step0 -> call_tool(search_docs) "
+                f"chat_id={state.chat_id!r} (chat-scoped KB retrieval)"
+            )
+            return NextStep(
+                action="call_tool",
+                tool_name="search_docs",
+                tool_args={"query": state.prompt, "top_k": 4, "chat_id": state.chat_id},
             )
 
         if state.task_type == "document-generation":
@@ -767,6 +877,14 @@ def decide_next_step(state: TaskState) -> NextStep:
             return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
 
         if last.tool_name == "search_docs":
+            if state.task_type == "chat":
+                state.sources = _sources_from_results(last.observation or {})
+                chat_prompt = _build_chat_prompt(state.prompt, state.history, last.observation or {})
+                print(
+                    f"[PLANNER] task_id={state.task_id} chat KB retrieval observed "
+                    f"({len(state.sources)} source(s)) -> chaining to call_qwen with conversation context"
+                )
+                return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=chat_prompt)
             reasoning_prompt = _build_docsearch_prompt(state.prompt, last.observation or {})
             print(f"[PLANNER] task_id={state.task_id} search_docs observed -> chaining to call_qwen")
             return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)

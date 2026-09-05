@@ -17,18 +17,18 @@
       <span class="name">Sovereign</span>
     </div>
     <a href="#" id="nav-new-task" class="sidebar-new-task">
-      <iconify-icon icon="lucide:plus"></iconify-icon><span>New Task</span>
+      <iconify-icon icon="lucide:plus"></iconify-icon><span>New Chat</span>
     </a>
 
     <div class="sidebar-nav custom-scroll">
-      <div class="sidebar-section-label">Tasks</div>
+      <div class="sidebar-section-label">Chats</div>
       <div id="task-sidebar-list" class="task-sidebar-list"></div>
       <div id="task-sidebar-empty" class="task-sidebar-empty" hidden>
         <iconify-icon icon="lucide:message-square-dashed"></iconify-icon>
-        <span>Your tasks will appear here</span>
+        <span>Your chats will appear here</span>
       </div>
 
-      <div class="sidebar-section-label">Files &amp; Deliverables</div>
+      <div class="sidebar-section-label">Files &amp; Knowledge Base</div>
       <div id="files-sidebar-list" class="task-sidebar-list"></div>
       <div id="files-sidebar-empty" class="task-sidebar-empty" hidden>
         <iconify-icon icon="lucide:folder-open"></iconify-icon>
@@ -88,8 +88,8 @@
         <div class="greet">Hi, Operator 👋</div>
         <h1>What are we building today?</h1>
         <div class="composer-bar composer-bar--centered">
-          <button class="composer-btn" id="composer-attach-idle" title="Attach a file"><iconify-icon icon="lucide:plus"></iconify-icon></button>
-          <input id="composer-input-idle" type="text" placeholder="Describe the task, or attach a document...">
+          <button class="composer-btn" id="composer-attach-idle" title="Attach a PDF to this chat's Knowledge Base"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <input id="composer-input-idle" type="text" placeholder="Ask a question, or attach a PDF...">
           <button class="composer-btn composer-send" id="composer-send-idle" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
         </div>
         <div class="file-preview" id="file-preview-idle">
@@ -108,8 +108,8 @@
       <div class="composer-inner">
         <div id="live-strip" class="live-strip"></div>
         <div class="composer-bar">
-          <button class="composer-btn" id="composer-attach" title="Attach a file"><iconify-icon icon="lucide:plus"></iconify-icon></button>
-          <input id="composer-input" type="text" placeholder="Describe the task, or attach a document...">
+          <button class="composer-btn" id="composer-attach" title="Attach a PDF to this chat's Knowledge Base"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <input id="composer-input" type="text" placeholder="Ask a follow-up, or attach a PDF...">
           <button class="composer-btn composer-send" id="composer-send" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
         </div>
         <div class="file-preview" id="file-preview">
@@ -119,7 +119,7 @@
       </div>
     </div>
 
-    <input type="file" id="file-input">
+    <input type="file" id="file-input" accept="application/pdf,.pdf">
   </main>
 
   <!-- Maximized execution graph overlay -->
