@@ -4,7 +4,7 @@ Field names/types here are locked — do not rename or restructure
 without going through the Contract Change Protocol (§4.4).
 """
 from typing import Any, Literal, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class ExecuteTaskRequest(BaseModel):
@@ -33,6 +33,11 @@ class TaskResult(BaseModel):
 
 
 class ExecuteTaskResponse(BaseModel):
+    # `model_used` is a real contract field name (§2.4) — protected_namespaces=()
+    # just tells pydantic not to warn that it looks like one of pydantic's own
+    # reserved `model_*` methods. Purely cosmetic: no JSON shape change.
+    model_config = ConfigDict(protected_namespaces=())
+
     status: Literal["completed", "failed"]
     model_used: Optional[str] = None
     task_type: Optional[str] = None

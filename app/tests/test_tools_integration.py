@@ -19,6 +19,16 @@ from app.router.model_registry import TEXT_MODEL, LORA_ADAPTER
 
 @pytest.mark.asyncio
 async def test_code_execution_flow_calls_tool_then_qwen():
+    """
+    The real flow is two Qwen calls around one tool call: Qwen first
+    generates the actual Python to run (never the raw user prompt — see
+    planner._build_codeexec_code_prompt), THAT code is executed via
+    execute_code, and only then does a second Qwen call explain the
+    verified result to the user. A single fixed mock return value for
+    call_inference (the old version of this test) can't represent that —
+    it would (and did) also get used AS the "generated code", which isn't
+    valid Python, incorrectly failing the whole request.
+    """
     req = ExecuteTaskRequest(
         task_id="c1",
         prompt="calculate the sum: ```python\nprint(2+2)\n```",
@@ -26,18 +36,21 @@ async def test_code_execution_flow_calls_tool_then_qwen():
         file_mime_type=None,
     )
     tool_result = {"stdout": "4\n", "stderr": "", "exit_code": 0}
+    generated_code = "```python\nprint(2 + 2)\n```"
+    final_answer = "The result is 4."
 
     with patch("app.agent.loop.execute_code", new=AsyncMock(return_value=tool_result)) as mocked_tool, \
-         patch("app.agent.loop.call_inference", new=AsyncMock(return_value="The result is 4.")) as mocked_infer:
+         patch("app.agent.loop.call_inference", new=AsyncMock(side_effect=[generated_code, final_answer])) as mocked_infer:
         resp = await run_agent_loop(req)
 
     assert resp.status == "completed"
     assert resp.result.type == "text"
-    assert resp.result.text == "The result is 4."
+    assert resp.result.text == final_answer
     assert resp.model_used == TEXT_MODEL
     mocked_tool.assert_awaited_once()
     assert mocked_tool.call_args.kwargs["language"] == "python"
-    mocked_infer.assert_awaited_once()
+    assert mocked_tool.call_args.kwargs["code"] == "print(2 + 2)"
+    assert mocked_infer.await_count == 2
 
 
 @pytest.mark.asyncio
