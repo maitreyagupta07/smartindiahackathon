@@ -14,3 +14,6 @@ config.json
 
 # Runtime database (recreated on first run)
 backend/audit_log.sqlite3
+
+# run.sh service logs
+.run-logs/

@@ -9,6 +9,12 @@ from executor.loop import run_agent_loop
 app = FastAPI(title="Agent Loop / Task Executor - Person F")
 
 
+@app.get("/health")
+async def health() -> dict:
+    """Liveness probe used by run.sh and ops tooling. Not part of §2.4."""
+    return {"status": "ok"}
+
+
 @app.post("/execute-task", response_model=ExecuteTaskResponse)
 async def execute_task(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
     """
@@ -21,4 +27,4 @@ async def execute_task(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=False)
