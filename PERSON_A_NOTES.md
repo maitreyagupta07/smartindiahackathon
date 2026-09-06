@@ -5,6 +5,48 @@ Not part of the contract — just a scratch list so nothing discussed gets lost.
 ## In progress
 - [ ] PDF / scanned-report ingestion for approval-note requests (started — see below)
 
+## Done — single-node deployment refactor (2026-09-07)
+Collapsed the old 3-process deployment (backend:8000, agent:8002, tools:8001,
+each an independent FastAPI app talking to the others over localhost HTTP)
+into ONE FastAPI app (`app/`), so ONLY :8000 is ever a network listener.
+Ollama (a separate local OS process) and the Docker code-execution sandbox
+(a separate, network-disabled, resource-capped container per run) are the
+only two things that intentionally remain outside the single process — one
+because it's a third-party binary, the other because the container boundary
+IS the actual security isolation. See app/main.py's docstring for the full
+rationale. Old `agent/`, `tools/app/`, `backend/` directories are gone;
+everything moved into `app/{api,agent,router,inference,tools,schemas,
+storage,audit,tests}/` as direct Python calls instead of HTTP hops
+(app/tools/facade.py replaces the old tools_client.py HTTP client).
+
+Two real, pre-existing sovereignty gaps were found and only partially fixed
+while validating this (neither was introduced by this refactor — they
+existed in the multi-service version too, just never surfaced/tested):
+- **ChromaDB telemetry** (fixed): its default client tries to send
+  `CollectionAddEvent`/`CollectionQueryEvent` telemetry to Chroma's own
+  servers on every doc-search call. Now disabled via
+  `Settings(anonymized_telemetry=False)` in `app/tools/docsearch.py`.
+- **ChromaDB's embedding model auto-download** (flagged, NOT fixed): the
+  `ONNXMiniLM_L6_V2` embedding function downloads its ~79MB model weights
+  from the internet the first time doc-search ever runs on a machine,
+  caching to `~/.cache/chroma/onnx_models/`. For a genuinely air-gapped
+  demo/deployment, that model needs to be pre-downloaded and cached BEFORE
+  going offline — it is a real, one-time external dependency that no code
+  change here removes, only a deployment-step note. Test this by clearing
+  the cache dir and confirming doc-search works OFFLINE only if pre-cached.
+- **Ollama's systemd unit bound `0.0.0.0`** (needs the user to run, sudo
+  required): changed the plan to bind `127.0.0.1` only via
+  `/etc/systemd/system/ollama.service.d/override.conf` + `daemon-reload` +
+  `restart ollama` — commands given to the user to run themselves since
+  this session has no sudo password. `config.json`'s `inference_host` was
+  also changed from a LAN IP (needed for the old multi-machine testing
+  setup) to `"localhost"`, since Ollama is now always co-located with the
+  app on the same machine.
+- **Docker sandbox not verified in this session** — Docker isn't installed/
+  reachable in this dev sandbox, so code-execution could only be confirmed
+  to fail *cleanly* (proper `status:"failed"` + populated `error`), not to
+  actually succeed end-to-end. Needs a real run on a machine with Docker.
+
 ## Resolved — classifier rewrite (2026-09-06)
 The "ambiguous phrasing confuses the docx content" concern below turned out
 to be a real, specific bug: `_strip_file_format_phrase()` cut from the FIRST

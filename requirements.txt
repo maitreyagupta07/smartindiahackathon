@@ -1,0 +1,36 @@
+# Single-node Workbench — merged requirements for the one app/ process
+# (was three separate requirements.txt files under backend/, agent/, tools/
+# before the single-node refactor; see PERSON_A_NOTES.md).
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+pydantic==2.9.2
+
+# Local document search (app/tools/docsearch.py) — ChromaDB with its
+# default on-disk, no-server, local embedding model. No external API calls.
+chromadb==0.5.5
+
+# Real Word/Excel/PPT generation (app/tools/filegen.py)
+python-docx==1.1.2
+openpyxl==3.1.5
+python-pptx==0.6.23
+
+# Sandboxed code execution (app/tools/sandbox.py) — talks to the local
+# Docker daemon; Docker itself is a separate, required system dependency.
+docker==7.1.0
+python-dotenv==1.0.1
+
+# PDF/scanned-report ingestion (app/tools/pdf_extract.py, pdf_ingest.py) —
+# pure pip packages, fully offline. pytesseract additionally needs the
+# system `tesseract-ocr` binary for the scanned-PDF OCR fallback; without
+# it, a text-layer PDF still ingests fine, a scanned-only one reports
+# cleanly instead of crashing.
+pdfplumber==0.11.4
+pymupdf==1.24.11
+pytesseract==0.3.13
+Pillow==10.4.0
+
+# Tests
+pytest==8.3.3
+pytest-asyncio==0.24.0
