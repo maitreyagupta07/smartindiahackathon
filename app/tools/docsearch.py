@@ -15,6 +15,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+# Hard-disable ChromaDB's telemetry at the source, before chromadb itself is
+# imported below. Passing Settings(anonymized_telemetry=False) alone is NOT
+# enough in this chromadb version (0.5.5): its Posthog telemetry wrapper
+# unconditionally still calls posthog.capture(...) regardless of that
+# setting (a bug in chromadb's wrapper, confirmed by reading
+# chromadb/telemetry/product/posthog.py — the disabled flag only sets
+# `posthog.disabled = True`, which the wrapper never actually checks before
+# calling capture()). Right now that call happens to crash harmlessly
+# before any network I/O, purely because of an unrelated posthog/chromadb
+# version mismatch — that's luck, not a guarantee, and would silently start
+# actually sending data if a future dependency bump fixes that mismatch.
+# Monkeypatching posthog.capture to a no-op here removes the possibility
+# entirely, deterministically, regardless of chromadb's internal bug.
+import posthog
+posthog.capture = lambda *args, **kwargs: None
+posthog.disabled = True
+
 import chromadb
 from chromadb.utils.embedding_functions.onnx_mini_lm_l6_v2 import ONNXMiniLM_L6_V2
 from docx import Document as DocxDocument

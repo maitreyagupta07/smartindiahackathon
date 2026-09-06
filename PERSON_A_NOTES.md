@@ -19,13 +19,23 @@ everything moved into `app/{api,agent,router,inference,tools,schemas,
 storage,audit,tests}/` as direct Python calls instead of HTTP hops
 (app/tools/facade.py replaces the old tools_client.py HTTP client).
 
-Two real, pre-existing sovereignty gaps were found and only partially fixed
-while validating this (neither was introduced by this refactor — they
-existed in the multi-service version too, just never surfaced/tested):
-- **ChromaDB telemetry** (fixed): its default client tries to send
-  `CollectionAddEvent`/`CollectionQueryEvent` telemetry to Chroma's own
-  servers on every doc-search call. Now disabled via
-  `Settings(anonymized_telemetry=False)` in `app/tools/docsearch.py`.
+Real, pre-existing sovereignty gaps were found while validating this
+(neither was introduced by this refactor — they existed in the
+multi-service version too, just never surfaced/tested):
+- **ChromaDB telemetry (fixed, properly this time)**: its default client
+  tries to send telemetry events (`ClientStartEvent`, `CollectionAddEvent`,
+  `CollectionQueryEvent`, ...) to Chroma's own servers. Passing
+  `Settings(anonymized_telemetry=False)` alone did NOT actually stop this
+  in chromadb==0.5.5 — its Posthog telemetry wrapper still unconditionally
+  calls `posthog.capture(...)` regardless of that setting (a real bug in
+  chromadb's wrapper: the `disabled` flag it sets is never actually
+  checked before calling capture). It only "worked" by accident because an
+  unrelated posthog version mismatch made that call crash before any
+  network I/O — luck, not a guarantee. Fixed properly in
+  `app/tools/docsearch.py` by monkeypatching `posthog.capture` to a no-op
+  at import time, before chromadb ever uses it — deterministic regardless
+  of dependency version changes. Verified: zero telemetry log lines on a
+  fresh run after the fix (there were several before it).
 - **ChromaDB's embedding model auto-download** (flagged, NOT fixed): the
   `ONNXMiniLM_L6_V2` embedding function downloads its ~79MB model weights
   from the internet the first time doc-search ever runs on a machine,
@@ -34,18 +44,20 @@ existed in the multi-service version too, just never surfaced/tested):
   going offline — it is a real, one-time external dependency that no code
   change here removes, only a deployment-step note. Test this by clearing
   the cache dir and confirming doc-search works OFFLINE only if pre-cached.
-- **Ollama's systemd unit bound `0.0.0.0`** (needs the user to run, sudo
-  required): changed the plan to bind `127.0.0.1` only via
-  `/etc/systemd/system/ollama.service.d/override.conf` + `daemon-reload` +
-  `restart ollama` — commands given to the user to run themselves since
-  this session has no sudo password. `config.json`'s `inference_host` was
-  also changed from a LAN IP (needed for the old multi-machine testing
-  setup) to `"localhost"`, since Ollama is now always co-located with the
-  app on the same machine.
-- **Docker sandbox not verified in this session** — Docker isn't installed/
-  reachable in this dev sandbox, so code-execution could only be confirmed
-  to fail *cleanly* (proper `status:"failed"` + populated `error`), not to
-  actually succeed end-to-end. Needs a real run on a machine with Docker.
+- **Ollama's systemd unit bound `0.0.0.0`** — DONE by the user: changed to
+  `127.0.0.1` only via `/etc/systemd/system/ollama.service.d/override.conf`
+  + `daemon-reload` + `restart ollama`. Verified: the LAN IP now times out,
+  `localhost:11434` still works. `config.json`'s `inference_host` was also
+  changed from a LAN IP (needed for the old multi-machine testing setup)
+  to `"localhost"`, since Ollama is now always co-located with the app on
+  the same machine.
+- **Docker sandbox — installed by the user and VERIFIED working**: a real
+  code-execution request (`"execute this code: print(sum(range(1,101)))"`)
+  ran inside an actual Docker container and returned the correct answer
+  (5050) — genuinely computed, not guessed by the model. Needed the
+  `python:3.11-slim` image pulled once (`docker pull python:3.11-slim`) —
+  worth pre-pulling before a demo so the very first code-execution request
+  isn't slowed by an on-the-spot image pull.
 
 ## Resolved — classifier rewrite (2026-09-06)
 The "ambiguous phrasing confuses the docx content" concern below turned out
