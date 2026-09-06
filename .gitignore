@@ -5,3 +5,12 @@ __pycache__/
 .env
 *.egg-info/
 .pytest_cache/
+
+# macOS junk
+.DS_Store
+
+# Per-machine config (copy config.json.example -> config.json and set your own values)
+config.json
+
+# Runtime database (recreated on first run)
+backend/audit_log.sqlite3
