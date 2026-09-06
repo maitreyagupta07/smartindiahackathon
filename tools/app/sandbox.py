@@ -13,7 +13,7 @@ import time
 import uuid
 
 import docker
-from docker.errors import ContainerError, ImageNotFound, APIError
+from docker.errors import ContainerError, ImageNotFound, APIError, DockerException
 
 _LANGUAGE_IMAGES = {
     "python": "python:3.11-slim",
@@ -41,8 +41,17 @@ class UnsupportedLanguage(Exception):
     pass
 
 
+class SandboxUnavailable(Exception):
+    """The Docker sandbox can't be reached (daemon not running / not installed)."""
+
+
 def _get_client() -> docker.DockerClient:
-    return docker.from_env()
+    try:
+        return docker.from_env()
+    except DockerException as e:
+        raise SandboxUnavailable(
+            "code execution sandbox unavailable — the Docker daemon is not running on this machine"
+        ) from e
 
 
 def _build_tar(filename: str, content: str) -> io.BytesIO:

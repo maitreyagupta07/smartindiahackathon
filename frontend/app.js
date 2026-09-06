@@ -82,11 +82,11 @@ const Api = {
 
   /** Ask a question in a chat. Server keeps recent conversation context and
    *  retrieves only THIS chat's uploaded documents. */
-  async chatMessage(chatId, { user_id, prompt, chat_title = null }) {
+  async chatMessage(chatId, { user_id, prompt, chat_title = null, file_base64 = null, file_mime_type = null, file_name = null }) {
     const res = await fetch(`${API_BASE}/api/chat/${encodeURIComponent(chatId)}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id, prompt, chat_title }),
+      body: JSON.stringify({ user_id, prompt, chat_title, file_base64, file_mime_type, file_name }),
     });
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `message failed (${res.status})`);
@@ -205,6 +205,9 @@ function fileTypeIcon(filename = '') {
   const ext = filename.split('.').pop().toLowerCase();
   if (ext === 'xlsx' || ext === 'xls') return 'lucide:file-spreadsheet';
   if (ext === 'pptx' || ext === 'ppt') return 'lucide:file-sliders';
+  if (ext === 'doc' || ext === 'docx') return 'lucide:file-type';
+  if (ext === 'pdf') return 'lucide:file-text';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return 'lucide:image';
   return 'lucide:file-text';
 }
 

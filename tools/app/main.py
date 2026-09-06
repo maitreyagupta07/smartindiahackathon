@@ -21,6 +21,7 @@ from . import sandbox
 from . import docsearch
 from . import filegen
 from . import pdf_ingest
+from . import doc_extract
 
 app = FastAPI(title="Tools Service (Person C)")
 install_error_handlers(app)
@@ -50,6 +51,15 @@ def execute_code(req: ExecuteCodeRequest):
         result = sandbox.run_code(req.code, req.language)
     except sandbox.UnsupportedLanguage as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except sandbox.SandboxUnavailable as e:
+        # Docker isn't running on this machine — degrade gracefully instead of
+        # 500ing the whole task. The agent still finalizes with the code as
+        # text; it just isn't executed here.
+        return ExecuteCodeResponse(
+            stdout="",
+            stderr="(execution skipped: sandbox unavailable on this host)",
+            exit_code=127,
+        )
 
     return ExecuteCodeResponse(**result)
 
@@ -123,21 +133,24 @@ def ingest_doc(req: IngestDocRequest):
         raise HTTPException(status_code=400, detail="`filename` is required")
     if not req.file_base64:
         raise HTTPException(status_code=400, detail="`file_base64` is empty")
-    if not pdf_ingest.is_pdf(req.mime_type, req.filename):
+    if not doc_extract.is_supported(req.mime_type, req.filename):
         raise HTTPException(
             status_code=400,
-            detail=f"unsupported file type {req.mime_type or req.filename!r} — only PDF is supported",
+            detail=(
+                f"unsupported file type {req.mime_type or req.filename!r} — supported: "
+                f"{doc_extract.describe_supported()}"
+            ),
         )
 
     try:
-        pages = pdf_ingest.extract_pdf_pages(req.file_base64)
-    except pdf_ingest.PdfExtractionError as e:
-        raise HTTPException(status_code=400, detail=f"could not read PDF: {e}")
+        pages = doc_extract.extract_pages(req.file_base64, req.mime_type, req.filename)
+    except doc_extract.DocExtractionError as e:
+        raise HTTPException(status_code=400, detail=f"could not read document: {e}")
 
     if not pages:
         raise HTTPException(
             status_code=400,
-            detail="no extractable text found in PDF (empty, or a scanned PDF with no OCR available)",
+            detail="no extractable text found in the document (it may be empty, or a scan with no OCR available)",
         )
 
     try:
