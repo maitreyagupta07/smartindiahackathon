@@ -350,7 +350,7 @@
   </div>
 </template>
 
-<script src="app.js"></script>
+<script src="app.js?v=4"></script>
 <script>
   AdminAuth.guard(); // redirects to admin-login.html immediately if no active admin session
   document.getElementById('admin-logout').addEventListener('click', (e) => {
@@ -362,6 +362,6 @@
   const tpl = document.getElementById('audit-table-template');
   document.getElementById('audit-table-panel').appendChild(tpl.content.cloneNode(true));
 </script>
-<script src="admin.js"></script>
+<script src="admin.js?v=4"></script>
 </body>
 </html>

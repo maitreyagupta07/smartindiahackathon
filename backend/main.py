@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-
+from fastapi.middleware.cors import CORSMiddleware
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -53,6 +53,18 @@ DB_PATH = Path(__file__).resolve().parent / "audit_log.sqlite3"
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"  # Person D1 drops build here
 
 app = FastAPI(title="Person B - API, Router & Task Queue")
+# Local-only app: allow the frontend from any localhost/127.0.0.1 origin,
+# whatever port the static server happens to use (python -m http.server 5500,
+# VS Code Live Server 5500/5501, the backend itself on 8000, etc). A regex is
+# used rather than "*" so it stays compatible with allow_credentials=True
+# (Starlette echoes the matched origin, never a bare "*").
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # In-memory task store: task_id -> dict matching §2.3 GET /api/task-status shape
 TASKS: dict[str, dict] = {}
