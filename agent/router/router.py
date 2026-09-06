@@ -20,15 +20,29 @@ async def route_task(
     (executor/planner.py) is responsible for chaining a second Qwen step
     after Moondream's observation — routing only decides the entry point.
 
-    When `chat_id` is set the request is part of a chat conversation:
-    task_type is "chat" and the planner runs chat-scoped KB retrieval +
-    conversation context before the final Qwen answer.
+    When `chat_id` is set the request is part of a chat conversation — but
+    that alone must NOT force every message down the KB-only chat path.
+    A message inside a chat can still be a real action request ("generate
+    a word doc of the oil leak in B23", "run this code") rather than a
+    knowledge question; forcing chat_id -> task_type="chat" unconditionally
+    made every such request search the (often-empty/irrelevant) chat
+    Knowledge Base and report "not in Knowledge Base" instead of actually
+    generating the file/running the code. So the classifier always runs
+    first: only when it finds no strong actionable signal (i.e. it would
+    have fallen back to plain "text-generation" anyway) does chat_id
+    upgrade that into "chat" — a plain conversational question benefits
+    from KB retrieval + conversation history; an explicit document/code/
+    search request does not need to detour through the KB at all.
     """
-    if chat_id and chat_id.strip():
-        print(f"[ROUTER] chat_id={chat_id!r} -> task_type=chat first_model={TEXT_MODEL}")
+    result = classify(prompt, file_mime_type)
+
+    if chat_id and chat_id.strip() and result.task_type == "text-generation":
+        print(
+            f"[ROUTER] chat_id={chat_id!r} -> task_type=chat first_model={TEXT_MODEL} "
+            f"(no actionable signal in message — treated as a KB/conversation question)"
+        )
         return "chat", TEXT_MODEL, False
 
-    result = classify(prompt, file_mime_type)
     model_name = get_model_for_task_type(result.task_type)
     reasoning_flag = needs_reasoning(prompt, file_mime_type)
 

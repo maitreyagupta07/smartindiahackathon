@@ -5,7 +5,7 @@
     "agent_executor": 8002,
     "inference": 11434
   },
-  "inference_host": "10.57.109.70",
+  "inference_host": "172.16.215.253",
   "FILES_DIR": "./shared_files",
   "models": {
     "text_model": "qwen2.5:1.5b-instruct",
