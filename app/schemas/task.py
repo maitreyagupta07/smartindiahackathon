@@ -43,3 +43,14 @@ class ExecuteTaskResponse(BaseModel):
     task_type: Optional[str] = None
     result: TaskResult
     error: Optional[str] = None
+    # Additive, optional — every existing caller that only reads model_used/
+    # task_type/result/error is completely unaffected (defaults to None).
+    # models_used: every distinct model actually invoked, in call order —
+    # e.g. ["moondream", "qwen2.5:1.5b-instruct"] for an image+reasoning
+    # task — for surfacing the real multi-model chain (model_used alone
+    # only ever kept the LAST one). steps: a lightweight, prompt-free trace
+    # of each executed step (action/model/tool/status) for the frontend's
+    # activity map to render what genuinely happened instead of an inferred
+    # guess. See app/agent/state.py's models_used/step_summary properties.
+    models_used: Optional[list[str]] = None
+    steps: Optional[list[dict]] = None

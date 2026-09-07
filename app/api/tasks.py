@@ -39,6 +39,8 @@ async def submit_task(req: SubmitTaskRequest):
             "completed_at": None,
             "result": {"type": None, "text": None, "file_url": None, "file_name": None},
             "error": None,
+            "models_used": None,
+            "steps": None,
             "_user_id": req.user_id,
             "_file_uploaded": file_uploaded,
         }
@@ -69,6 +71,8 @@ async def task_status(task_id: str):
             "completed_at": task["completed_at"],
             "result": task["result"],
             "error": task["error"],
+            "models_used": task.get("models_used"),
+            "steps": task.get("steps"),
         }
 
 

@@ -103,3 +103,39 @@ class TaskState:
 
     def hit_max_steps(self) -> bool:
         return self.step_count >= self.max_steps
+
+    @property
+    def models_used(self) -> list[str]:
+        """
+        Every distinct model actually invoked during this run, in the order
+        first used — e.g. ["moondream", "qwen2.5:1.5b-instruct"] for an
+        image+reasoning task. `model_used` (singular) only ever kept the
+        LAST model for the contract's top-level field; this is additive, for
+        surfacing the real multi-model chain to the frontend's activity map
+        without touching that existing field.
+        """
+        seen: list[str] = []
+        for record in self.step_records:
+            if record.model_used and record.model_used not in seen:
+                seen.append(record.model_used)
+        return seen
+
+    @property
+    def step_summary(self) -> list[dict]:
+        """
+        A lightweight, frontend-safe trace of every step actually executed —
+        action/model/tool/status only, never the raw prompt text or full
+        observation (avoids bloating the response or leaking prompt
+        internals). This is what lets the activity map show what genuinely
+        happened instead of an inferred/honest-but-vague guess.
+        """
+        return [
+            {
+                "step_number": r.step_number,
+                "action": r.action,
+                "model_used": r.model_used,
+                "tool_name": r.tool_name,
+                "status": r.status,
+            }
+            for r in self.step_records
+        ]

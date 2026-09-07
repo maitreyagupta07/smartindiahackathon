@@ -138,6 +138,8 @@ async def chat_message(chat_id: str, req: ChatMessageRequest):
             "completed_at": None,
             "result": {"type": None, "text": None, "file_url": None, "file_name": None},
             "error": None,
+            "models_used": None,
+            "steps": None,
             "_user_id": req.user_id,
             "_file_uploaded": req.file_base64 is not None,
             "_chat_id": chat_id,

@@ -55,14 +55,56 @@ function ensureChat() {
 /* ============================================================
    State machine: turns raw backend fields into honest UI state
    ============================================================ */
+
+/** Every distinct model actually used for this task, in call order. Prefers
+ *  the real models_used trace (additive backend field — see
+ *  app/agent/state.py's models_used property); falls back to the single
+ *  model_used field for older/demo data that doesn't have it yet. */
+function modelsUsedList(task) {
+  if (Array.isArray(task.models_used) && task.models_used.length) return task.models_used;
+  return task.model_used ? [task.model_used] : [];
+}
+
+const TOOL_LABELS = {
+  execute_code: 'Code Execution (Sandbox)',
+  search_docs: 'Document Search',
+  generate_file: 'Generate File',
+};
+
+/** Every tool actually called for this task, in call order, with its real
+ *  per-call status — derived from the real step trace (task.steps) when
+ *  present, so this is a FACT, not a guess. Falls back to the old
+ *  file-result-implies-a-tool-ran inference when steps aren't available
+ *  (older/demo data). */
+function toolCallsList(task) {
+  if (Array.isArray(task.steps) && task.steps.length) {
+    return task.steps
+      .filter((s) => s.action === 'call_tool' && s.tool_name)
+      .map((s) => ({ tool_name: s.tool_name, label: TOOL_LABELS[s.tool_name] || s.tool_name, status: s.status }));
+  }
+  const resultType = task.result && task.result.type;
+  if (resultType === 'file') return [{ tool_name: 'generate_file', label: TOOL_LABELS.generate_file, status: 'ok' }];
+  return [];
+}
+
+/** Every model-calling step actually executed, in order, with the real
+ *  action/model/status — for the routing node's detailed per-call list. */
+function modelStepsList(task) {
+  if (!Array.isArray(task.steps)) return [];
+  return task.steps.filter((s) => s.action === 'call_qwen' || s.action === 'call_moondream');
+}
+
 function computeGraphState(task, nowMs) {
   const startedMs = new Date(task.started_at || task.submitted_at_client).getTime();
   const elapsed = Math.max(0, nowMs - startedMs);
   const state = {
     status: task.status,
     stages: { classification: 'pending', routing: 'pending', tool: 'pending', validation: 'pending', deliverable: 'pending' },
-    routingBranch: null,
-    toolBranch: null,
+    routingBranch: null,       // last/primary branch — kept for back-compat call sites
+    routingBranches: [],       // EVERY branch actually used (multi-model tasks light up more than one)
+    toolBranch: null,          // last/primary tool — kept for back-compat call sites
+    toolCalls: [],             // EVERY tool call actually made, real status each
+    modelSteps: [],            // EVERY model call actually made, in order
     error: task.error || null,
   };
 
@@ -77,14 +119,21 @@ function computeGraphState(task, nowMs) {
   // completed or failed — reconcile with real fields, never guess beyond them
   state.stages.classification = 'completed';
   state.stages.routing = 'completed';
-  state.routingBranch = routeForModel(task.model_used);
 
-  const resultType = task.result && task.result.type;
-  if (resultType === 'file') {
-    state.stages.tool = 'completed';
-    state.toolBranch = 'file';
+  const models = modelsUsedList(task);
+  state.routingBranches = [...new Set(models.map(routeForModel).filter(Boolean))];
+  state.routingBranch = state.routingBranches[state.routingBranches.length - 1] || null;
+  state.modelSteps = modelStepsList(task);
+
+  state.toolCalls = toolCallsList(task);
+  if (state.toolCalls.length) {
+    state.stages.tool = state.toolCalls.some((c) => c.status === 'error') ? 'error' : 'completed';
+    state.toolBranch = state.toolCalls[state.toolCalls.length - 1].tool_name;
   } else {
-    state.stages.tool = 'na'; // honest: the contract doesn't expose which/whether a tool ran for text results
+    // Only genuinely honest now when task.steps isn't available at all
+    // (older/demo data) — with real steps, an empty list here is a
+    // confirmed fact (no tool was called), not a guess.
+    state.stages.tool = 'na';
     state.toolBranch = 'na';
   }
 
@@ -169,6 +218,7 @@ function renderConversation() {
   const inner = document.getElementById('conversation-inner');
   inner.innerHTML = chatMessages.map(renderTurn).join('');
   wireCopyButtons();
+  wireSpeakButtons();
   startWorkingTicker();
   const scroller = document.getElementById('conversation-scroll');
   if (scroller) scroller.scrollTop = scroller.scrollHeight;
@@ -217,8 +267,12 @@ function renderTurn(turn) {
     return `<div class="msg-ai">${workingLineHtml()}</div>`;
   }
 
-  const chip = turn.model_used
-    ? `<div class="model-chip"><iconify-icon icon="lucide:terminal" style="font-size:12px"></iconify-icon><span class="mono">${escapeHtml(turn.model_used)}</span></div>`
+  // Multi-model tasks (e.g. an image described by Moondream, then reasoned
+  // over by Qwen) show EVERY model actually used, in call order — not just
+  // the last one — via the additive models_used trace when present.
+  const modelsForChip = modelsUsedList(turn);
+  const chip = modelsForChip.length
+    ? `<div class="model-chip"><iconify-icon icon="lucide:terminal" style="font-size:12px"></iconify-icon><span class="mono">${escapeHtml(modelsForChip.join(' → '))}</span></div>`
     : '';
   const result = turn.result || {};
   let body = '';
@@ -240,10 +294,13 @@ function renderTurn(turn) {
         </div>
       </div>`;
   } else if (result.text) {
+    const plain = answerToPlainText(result.text);
     body = `<div class="ai-rich">${renderRichText(result.text)}</div>${renderSources(result.sources)}` +
       `<div class="answer-actions">` +
-      `<button class="copy-answer-btn" data-copy-text="${escapeHtml(answerToPlainText(result.text))}">` +
+      `<button class="copy-answer-btn" data-copy-text="${escapeHtml(plain)}">` +
       `<iconify-icon icon="lucide:copy" style="font-size:13px"></iconify-icon><span class="label">Copy answer</span></button>` +
+      `<button class="speak-answer-btn" data-speak-text="${escapeHtml(plain)}" title="Read this answer aloud">` +
+      `<iconify-icon icon="lucide:volume-2" style="font-size:13px"></iconify-icon><span class="label">Listen</span></button>` +
       `</div>`;
   } else {
     body = `<p class="summary-text" style="color:var(--text-muted)">Completed with no returned content.</p>`;
@@ -269,7 +326,7 @@ function taskMetaRow(task) {
   return `
     <div class="task-meta-row">
       <span class="task-meta-item mono" title="Task ID"><iconify-icon icon="lucide:hash" style="font-size:11px"></iconify-icon>${escapeHtml(task.task_id.slice(0, 8))}</span>
-      ${task.model_used ? `<span class="task-meta-item mono" title="Model used"><iconify-icon icon="lucide:cpu" style="font-size:11px"></iconify-icon>${escapeHtml(task.model_used)}</span>` : ''}
+      ${modelsUsedList(task).length ? `<span class="task-meta-item mono" title="Model(s) used, in call order"><iconify-icon icon="lucide:cpu" style="font-size:11px"></iconify-icon>${escapeHtml(modelsUsedList(task).join(' → '))}</span>` : ''}
       <span class="task-meta-item mono" title="Duration"><iconify-icon icon="lucide:timer" style="font-size:11px"></iconify-icon>${duration}</span>
       <span class="task-meta-item mono task-meta-gap" title="The current backend contract does not expose per-task token usage — see README."><iconify-icon icon="lucide:coins" style="font-size:11px"></iconify-icon>Tokens: not exposed</span>
     </div>`;
@@ -327,6 +384,7 @@ function chatSidebarItemHtml(c) {
 
 function openChat(chatId) {
   if (!chatId || chatId === currentChatId) return;
+  if ('speechSynthesis' in window) window.speechSynthesis.cancel(); // don't let a switched-away answer keep talking
   stopPolling();
   currentTask = null;
   currentChatId = chatId;
@@ -402,6 +460,8 @@ function runDemoSimulation(task) {
     const patch = {
       status: 'completed',
       model_used: 'qwen2.5:1.5b-instruct',
+      models_used: ['qwen2.5:1.5b-instruct'],
+      steps: [{ step_number: 1, action: 'call_qwen', model_used: 'qwen2.5:1.5b-instruct', tool_name: null, status: 'ok' }],
       completed_at,
       error: null,
       result: {
@@ -619,6 +679,7 @@ function initComposer() {
 
   document.getElementById('nav-new-task').addEventListener('click', (e) => {
     e.preventDefault();
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     stopPolling();
     currentTask = null;
     currentChatId = null;
@@ -712,21 +773,30 @@ function renderGraph(state) {
     { key: 'vision', label: 'Vision → moondream' },
     { key: 'lora', label: 'Approval-Note LoRA' },
   ];
-  const toolBranches = [
-    { key: 'file', label: 'Generate File' },
-    { key: 'na', label: 'No tool call reported' },
+  // Always show all three known tools as pill options (dim by default) plus
+  // whatever tool the backend actually reported that isn't one of the
+  // three — real per-call status now, not an inferred file-result guess.
+  const knownTools = [
+    { key: 'search_docs', label: TOOL_LABELS.search_docs },
+    { key: 'execute_code', label: TOOL_LABELS.execute_code },
+    { key: 'generate_file', label: TOOL_LABELS.generate_file },
   ];
+  const usedToolKeys = new Set(state.toolCalls.map((c) => c.tool_name));
+  const toolBranches = knownTools.concat(
+    [...usedToolKeys].filter((k) => !knownTools.some((t) => t.key === k)).map((k) => ({ key: k, label: TOOL_LABELS[k] || k }))
+  );
+  if (!state.toolCalls.length) toolBranches.push({ key: 'na', label: 'No tool call — model answered directly' });
 
   const routingPills = routeBranches.map((b) => {
-    const isActive = state.routingBranch === b.key;
-    const isKnown = !!state.routingBranch;
+    const isActive = state.routingBranches.includes(b.key);
+    const isKnown = state.routingBranches.length > 0;
     const cls = isActive ? 'active' : isKnown ? 'dim' : '';
     return `<div class="satellite-pill ${cls}" data-node="route-${b.key}" role="button" tabindex="0"><span class="dot"></span>${b.label}</div>`;
   }).join('');
 
   const toolPills = toolBranches.map((b) => {
-    const isActive = state.toolBranch === b.key;
-    const isKnown = !!state.toolBranch;
+    const isActive = b.key === 'na' ? !state.toolCalls.length && state.stages.tool !== 'pending' : usedToolKeys.has(b.key);
+    const isKnown = state.stages.tool !== 'pending';
     const cls = isActive ? 'active' : isKnown ? 'dim' : '';
     return `<div class="satellite-pill ${cls}" data-node="tool-${b.key}" role="button" tabindex="0"><span class="dot"></span>${b.label}</div>`;
   }).join('');
@@ -739,7 +809,7 @@ function renderGraph(state) {
       ${connector(state.stages.classification)}
       <div class="node-wrap">
         <div class="branch-cluster top">
-          <div class="branch-line ${state.routingBranch ? 'active' : ''}"></div>
+          <div class="branch-line ${state.routingBranches.length ? 'active' : ''}"></div>
           ${routingPills}
         </div>
         ${nodeCard('routing', state.stages.routing)}
@@ -747,7 +817,7 @@ function renderGraph(state) {
       ${connector(state.stages.routing)}
       <div class="node-wrap">
         <div class="branch-cluster bottom">
-          <div class="branch-line ${state.toolBranch ? 'active' : ''}"></div>
+          <div class="branch-line ${state.toolCalls.length ? 'active' : ''}"></div>
           ${toolPills}
         </div>
         ${nodeCard('tool', state.stages.tool)}
@@ -787,15 +857,39 @@ function openDrawerFor(nodeKey, state) {
   if (nodeKey.startsWith('route-')) {
     const branch = nodeKey.replace('route-', '');
     heading = routeLabelFor(branch) || branch;
-    status = state.routingBranch === branch ? 'completed' : state.routingBranch ? 'na' : 'pending';
-    desc = status === 'completed' ? 'This is the route the router actually selected for this task.' : status === 'na' ? 'Not the route taken for this task.' : 'Routing decision not yet resolved.';
+    const isUsed = state.routingBranches.includes(branch);
+    status = isUsed ? 'completed' : state.routingBranches.length ? 'na' : 'pending';
+    const modelsOnBranch = state.modelSteps.filter((s) => routeForModel(s.model_used) === branch);
+    if (isUsed) {
+      desc = state.routingBranches.length > 1
+        ? 'One of MULTIPLE models actually used for this task — see the full call order on the Routing node.'
+        : 'This is the route the router actually selected for this task.';
+      if (modelsOnBranch.length) {
+        kv = modelsOnBranch.map((s, i) => ({ k: `Call ${i + 1}`, v: `${s.action === 'call_moondream' ? 'Vision call' : 'Text call'} · ${s.status}` }));
+      }
+    } else {
+      desc = status === 'na' ? 'Not one of the routes taken for this task.' : 'Routing decision not yet resolved.';
+    }
   } else if (nodeKey.startsWith('tool-')) {
     const branch = nodeKey.replace('tool-', '');
-    heading = branch === 'file' ? 'Generate File' : 'No tool call reported';
-    status = state.toolBranch === branch ? (branch === 'na' ? 'na' : 'completed') : state.toolBranch ? 'na' : 'pending';
-    desc = branch === 'file'
-      ? (status === 'completed' ? `A file was generated for this task: ${t.result && t.result.file_name ? t.result.file_name : ''}` : 'This task did not produce a file result.')
-      : 'The task-status API does not report which (if any) tool ran for a text result — shown honestly as unconfirmed rather than guessed.';
+    const callsOnBranch = state.toolCalls.filter((c) => c.tool_name === branch);
+    if (branch === 'na') {
+      heading = 'No tool call';
+      status = state.stages.tool === 'pending' ? 'pending' : state.toolCalls.length ? 'na' : 'completed';
+      desc = status === 'completed'
+        ? 'Confirmed from the real execution trace: the model answered directly, with no tool call in this task.'
+        : 'A tool was actually called for this task — see the active pill(s) instead.';
+    } else {
+      heading = TOOL_LABELS[branch] || branch;
+      status = callsOnBranch.length ? (callsOnBranch.some((c) => c.status === 'error') ? 'error' : 'completed') : (state.stages.tool === 'pending' ? 'pending' : 'na');
+      if (callsOnBranch.length) {
+        desc = `Called ${callsOnBranch.length} time${callsOnBranch.length === 1 ? '' : 's'} during this task's execution.`;
+        kv = callsOnBranch.map((c, i) => ({ k: `Call ${i + 1}`, v: c.status === 'ok' ? 'Succeeded' : 'Failed' }));
+        if (branch === 'generate_file' && t.result && t.result.file_name) kv.push({ k: 'Output File', v: t.result.file_name });
+      } else {
+        desc = status === 'na' ? 'This tool was not called for this task.' : '';
+      }
+    }
   } else {
     const s = state.stages[nodeKey];
     heading = NODE_META[nodeKey].title();
@@ -814,12 +908,26 @@ function openDrawerFor(nodeKey, state) {
       desc = status === 'pending' ? '' : 'The system determined how this request should be handled.';
       if (status !== 'pending') kv = [{ k: 'Status', v: status === 'active' ? 'In progress' : 'Resolved' }];
     } else if (nodeKey === 'routing') {
-      desc = status === 'pending' ? '' : 'Selects which local model handles the request.';
-      if (t.model_used) kv = [{ k: 'Model Selected', v: t.model_used }, { k: 'Status', v: 'Resolved' }, { k: 'Token Usage', v: 'Not exposed by current backend contract' }];
-      else if (status === 'active') kv = [{ k: 'Status', v: 'Resolving…' }];
+      const models = modelsUsedList(t);
+      desc = status === 'pending' ? '' : models.length > 1
+        ? `MULTIPLE models were used for this task, in this order — a real multi-step chain, not a single call.`
+        : 'Selects which local model handles the request.';
+      if (state.modelSteps.length) {
+        // Real per-call trace: exact model + action + status for every call made.
+        kv = state.modelSteps.map((s, i) => ({
+          k: `${i + 1}. ${s.action === 'call_moondream' ? 'Vision' : 'Text'} call`,
+          v: `${s.model_used} · ${s.status === 'ok' ? 'succeeded' : 'failed'}`,
+        }));
+        kv.push({ k: 'Token Usage', v: 'Not exposed by current backend contract' });
+      } else if (models.length) {
+        kv = [{ k: 'Model Selected', v: models.join(' → ') }, { k: 'Status', v: 'Resolved' }, { k: 'Token Usage', v: 'Not exposed by current backend contract' }];
+      } else if (status === 'active') kv = [{ k: 'Status', v: 'Resolving…' }];
     } else if (nodeKey === 'tool') {
-      desc = status === 'na' ? 'No confirmed tool/knowledge activity for this result type.' : status === 'pending' ? '' : 'Local sandboxed tool or knowledge-base activity, when applicable.';
-      if (status === 'completed' && t.result && t.result.file_name) kv = [{ k: 'Output File', v: t.result.file_name }];
+      desc = status === 'na' ? 'Confirmed from the real execution trace: no tool was called for this result.' : status === 'pending' ? '' : `${state.toolCalls.length} tool call${state.toolCalls.length === 1 ? '' : 's'} made during this task, in order.`;
+      if (state.toolCalls.length) {
+        kv = state.toolCalls.map((c, i) => ({ k: `${i + 1}. ${c.label}`, v: c.status === 'ok' ? 'Succeeded' : 'Failed' }));
+        if (t.result && t.result.file_name) kv.push({ k: 'Output File', v: t.result.file_name });
+      }
     } else if (nodeKey === 'validation') {
       desc = status === 'error' ? 'The task returned an error.' : status === 'completed' ? 'Result returned without a reported error.' : '';
       if (t.error) kv = [{ k: 'Error', v: t.error }];
@@ -1171,6 +1279,49 @@ function wireCopyButtons() {
       else { setTimeout(() => btn.classList.remove('copied'), 1600); }
       if (!ok) toast('Could not access the clipboard — select and copy manually.', true);
     });
+  });
+}
+
+/** Text-to-speech for assistant answers — reads the exact plain-text
+ *  answer shown in the chat aloud, via the browser's built-in Web Speech
+ *  API (window.speechSynthesis). Fully local to the browser, no network
+ *  call — consistent with the air-gapped/sovereign story. Only one
+ *  utterance plays at a time: starting a new one, or re-clicking the same
+ *  button, stops whatever was already speaking. */
+let currentUtteranceBtn = null;
+function speakText(text, btn) {
+  if (!('speechSynthesis' in window)) {
+    toast('Text-to-speech is not supported in this browser.', true);
+    return;
+  }
+  const wasThisButton = currentUtteranceBtn === btn;
+  window.speechSynthesis.cancel(); // stop whatever was speaking, if anything
+  if (currentUtteranceBtn) setSpeakButtonState(currentUtteranceBtn, false);
+  currentUtteranceBtn = null;
+  if (wasThisButton) return; // clicking the currently-speaking button just stops it
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'en-US';
+  utterance.onend = () => { setSpeakButtonState(btn, false); currentUtteranceBtn = null; };
+  utterance.onerror = () => { setSpeakButtonState(btn, false); currentUtteranceBtn = null; };
+  currentUtteranceBtn = btn;
+  setSpeakButtonState(btn, true);
+  window.speechSynthesis.speak(utterance);
+}
+function setSpeakButtonState(btn, speaking) {
+  btn.classList.toggle('speaking', speaking);
+  const icon = btn.querySelector('iconify-icon');
+  const label = btn.querySelector('.label');
+  if (icon) icon.setAttribute('icon', speaking ? 'lucide:square' : 'lucide:volume-2');
+  if (label) label.textContent = speaking ? 'Stop' : 'Listen';
+}
+
+/** Wire up every speaker control currently in the conversation DOM. */
+function wireSpeakButtons() {
+  document.querySelectorAll('.speak-answer-btn').forEach((btn) => {
+    if (btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', () => speakText(btn.dataset.speakText || '', btn));
   });
 }
 

@@ -202,6 +202,8 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 task_type=state.task_type,
                 result=TaskResult(type="text", text=None),
                 error=state.error,
+                models_used=state.models_used or None,
+                steps=state.step_summary or None,
             )
 
         # File-generation tasks finalize straight off generate_file's
@@ -228,6 +230,8 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                     file_name=file_obs.get("file_name"),
                 ),
                 error=None,
+                models_used=state.models_used or None,
+                steps=state.step_summary or None,
             )
 
         # The LoRA adapter sometimes writes markdown-style **bold** into its
@@ -245,6 +249,8 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             task_type=state.task_type,
             result=TaskResult(type="text", text=str(final_text), sources=state.sources or None),
             error=None,
+            models_used=state.models_used or None,
+            steps=state.step_summary or None,
         )
 
     except Exception as exc:  # noqa: BLE001
@@ -255,4 +261,6 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             task_type=state.task_type,
             result=TaskResult(type="text", text=None),
             error=str(exc),
+            models_used=state.models_used or None,
+            steps=state.step_summary or None,
         )

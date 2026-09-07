@@ -114,6 +114,11 @@ async def dispatch_to_agent(
                 "type": None, "text": None, "file_url": None, "file_name": None
             }
             TASKS[task_id]["error"] = data.get("error")
+            # Additive fields (see schemas/task.py) — every distinct model
+            # actually used and a lightweight per-step trace, for the
+            # frontend's activity map. None when the agent didn't set them.
+            TASKS[task_id]["models_used"] = data.get("models_used")
+            TASKS[task_id]["steps"] = data.get("steps")
 
         if chat_id and data.get("status") == "completed":
             answer = (data.get("result") or {}).get("text")
