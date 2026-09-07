@@ -24,6 +24,11 @@ class StepRecord:
     tool_args: dict | None = None   # exact args passed to the tool (call_tool only) — lets a
                                      # retry or later replan step reuse them verbatim instead of
                                      # re-deriving (e.g. re-running content-prep) from scratch.
+    # Real token counts straight from Ollama's own response (prompt_eval_count/
+    # eval_count — see app/inference/client.py) for a call_qwen/call_moondream
+    # step. None for call_tool/finalize steps, or if Ollama didn't report them.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 @dataclass
@@ -74,6 +79,8 @@ class TaskState:
         error: str | None = None,
         tool_name: str | None = None,
         tool_args: dict | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
     ) -> StepRecord:
         self.step_count += 1
         record = StepRecord(
@@ -86,6 +93,8 @@ class TaskState:
             error=error,
             tool_name=tool_name,
             tool_args=tool_args,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )
         self.step_records.append(record)
         if model_used:
@@ -136,6 +145,22 @@ class TaskState:
                 "model_used": r.model_used,
                 "tool_name": r.tool_name,
                 "status": r.status,
+                "prompt_tokens": r.prompt_tokens,
+                "completion_tokens": r.completion_tokens,
             }
             for r in self.step_records
         ]
+
+    @property
+    def token_totals(self) -> dict:
+        """
+        Real token counts summed across every model call in this task —
+        straight from Ollama's own prompt_eval_count/eval_count fields, never
+        estimated. {"prompt_tokens": int, "completion_tokens": int,
+        "total_tokens": int}; all zero if Ollama never reported any (e.g. a
+        pure tool/doc-search task with no model call, or an older Ollama
+        version that omits these fields).
+        """
+        prompt = sum(r.prompt_tokens or 0 for r in self.step_records)
+        completion = sum(r.completion_tokens or 0 for r in self.step_records)
+        return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}

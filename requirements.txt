@@ -34,3 +34,7 @@ Pillow==10.4.0
 # Tests
 pytest==8.3.3
 pytest-asyncio==0.24.0
+
+# demo/network_monitor.py — live proof-of-air-gap check (also used by the
+# admin "Network & Usage" panel to report real per-request client IPs)
+psutil==6.0.0

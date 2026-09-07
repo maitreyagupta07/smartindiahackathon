@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign AI Operations</title>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20260908">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -34,11 +34,15 @@
       <a href="#" id="admin-logout" class="nav-item"><iconify-icon icon="lucide:log-out"></iconify-icon><span>Log Out</span></a>
     </div>
   </aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 
   <main class="main">
     <div class="hero-gradient"></div>
     <header class="topbar">
       <div class="topbar-left">
+        <button class="icon-btn sidebar-toggle" id="sidebar-toggle" title="Menu">
+          <iconify-icon icon="lucide:menu"></iconify-icon>
+        </button>
         <span id="admin-page-title" style="color:var(--text-primary);font-weight:500">Overview</span>
         <span class="admin-badge">AIR-GAPPED</span>
       </div>
@@ -265,26 +269,20 @@
               <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
               <div class="arch-node">
                 <div class="zone lan">Port 8000 · Only door in</div>
-                <div class="name">Backend / API &amp; Queue</div>
-                <div class="desc">Receives tasks, tracks status, serves this UI.</div>
-              </div>
-              <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
-              <div class="arch-node">
-                <div class="zone local">localhost only</div>
-                <div class="name">Agent Executor · :8002</div>
-                <div class="desc">Plan → act → observe loop.</div>
+                <div class="name">Sovereign Workbench (single process)</div>
+                <div class="desc">API, agent loop, router, tools &amp; file generation — one app, one port.</div>
               </div>
               <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
               <div class="arch-node">
                 <div class="zone local">localhost only</div>
                 <div class="name">Inference · :11434</div>
-                <div class="desc">Ollama — text, vision &amp; LoRA models.</div>
+                <div class="desc">Ollama — text, vision &amp; LoRA models (separate local process).</div>
               </div>
               <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
               <div class="arch-node">
-                <div class="zone local">localhost only</div>
-                <div class="name">Tools · :8001</div>
-                <div class="desc">Sandboxed code exec, doc search, file gen.</div>
+                <div class="zone local">no network, ephemeral</div>
+                <div class="name">Docker Sandbox</div>
+                <div class="desc">Code execution — network-disabled container per run.</div>
               </div>
               <div class="arch-connector"><iconify-icon icon="lucide:x"></iconify-icon></div>
               <div class="arch-node" style="border-style:dashed;opacity:.7">
@@ -300,7 +298,41 @@
             <div class="capability-badge"><iconify-icon icon="lucide:check-circle"></iconify-icon>Hash-chained audit log</div>
             <div class="capability-badge"><iconify-icon icon="lucide:check-circle"></iconify-icon>Single LAN-exposed port</div>
           </div>
-          <p style="font-size:11.5px;color:var(--text-muted);max-width:600px">This diagram reflects the fixed architecture in MASTER_BUILD_GUIDE.md §2.1/§2.2. It is a static explainer, not a live network monitor — the backend does not currently expose live traffic metrics.</p>
+          <p style="font-size:11.5px;color:var(--text-muted);max-width:600px">This diagram reflects the single-node architecture — one process on :8000 is the only thing ever reachable from the LAN; Ollama and the Docker sandbox stay internal. Independent, OS-level verification (Wireshark/Resource Monitor) remains the ultimate proof for a live demo — the panel below is this app's own honest self-report, not a packet capture.</p>
+
+          <span class="section-label">Live Client Connections &amp; Token Usage</span>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:600px">Real data from the audit log — the actual source IP FastAPI saw on each request (not anything the browser claims about itself), and real token counts straight from Ollama's own response (<span class="mono">prompt_eval_count</span>/<span class="mono">eval_count</span>), never estimated.</p>
+          <div class="stat-grid">
+            <div class="stat-block">
+              <div class="label">Unique Client IPs</div>
+              <div class="value" id="stat-unique-ips">—</div>
+              <div class="sub"><iconify-icon icon="lucide:network"></iconify-icon>ALL-TIME</div>
+            </div>
+            <div class="stat-block">
+              <div class="label">Non-Local IPs Seen</div>
+              <div class="value" id="stat-nonlocal-ips">—</div>
+              <div class="sub"><iconify-icon icon="lucide:shield-alert"></iconify-icon>SHOULD BE LAN-ONLY</div>
+            </div>
+            <div class="stat-block">
+              <div class="label">Total Tokens Processed</div>
+              <div class="value" id="stat-total-tokens">—</div>
+              <div class="sub"><iconify-icon icon="lucide:coins"></iconify-icon>PROMPT + COMPLETION</div>
+            </div>
+          </div>
+          <div class="panel">
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th><th>Client IP</th><th class="num">Requests</th><th class="num">Prompt Tokens</th><th class="num">Completion Tokens</th><th class="num">Last Seen</th>
+                </tr>
+              </thead>
+              <tbody id="network-usage-tbody"></tbody>
+            </table>
+            <div class="table-empty" id="network-usage-empty" hidden>
+              <iconify-icon icon="lucide:network"></iconify-icon>
+              <span>No client connections logged yet.</span>
+            </div>
+          </div>
         </section>
 
       </div>
@@ -350,7 +382,7 @@
   </div>
 </template>
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=20260908"></script>
 <script>
   AdminAuth.guard(); // redirects to admin-login.html immediately if no active admin session
   document.getElementById('admin-logout').addEventListener('click', (e) => {
@@ -362,6 +394,6 @@
   const tpl = document.getElementById('audit-table-template');
   document.getElementById('audit-table-panel').appendChild(tpl.content.cloneNode(true));
 </script>
-<script src="admin.js?v=4"></script>
+<script src="admin.js?v=20260908"></script>
 </body>
 </html>

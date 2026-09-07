@@ -67,6 +67,7 @@ async def dispatch_to_agent(
     file_mime_type: Optional[str] = None,
     chat_id: Optional[str] = None,
     history: Optional[list] = None,
+    client_ip: Optional[str] = None,
 ):
     """
     Runs one task through the agent loop in the background (fire-and-forget
@@ -82,6 +83,7 @@ async def dispatch_to_agent(
         async with TASK_LOCK:
             TASKS[task_id]["status"] = "processing"
             TASKS[task_id]["started_at"] = now_iso()
+            TASKS[task_id]["client_ip"] = client_ip
 
         try:
             req = ExecuteTaskRequest(
@@ -103,6 +105,7 @@ async def dispatch_to_agent(
                 task_id=task_id, user_id=user_id,
                 task_type="chat" if chat_id else "unknown",
                 model_used="none", file_uploaded=file_base64 is not None,
+                client_ip=client_ip,
             )
             return
 
@@ -119,6 +122,7 @@ async def dispatch_to_agent(
             # frontend's activity map. None when the agent didn't set them.
             TASKS[task_id]["models_used"] = data.get("models_used")
             TASKS[task_id]["steps"] = data.get("steps")
+            TASKS[task_id]["token_usage"] = data.get("token_usage")
 
         if chat_id and data.get("status") == "completed":
             answer = (data.get("result") or {}).get("text")
@@ -128,9 +132,13 @@ async def dispatch_to_agent(
                     if chat is not None:
                         chat["messages"].append({"role": "assistant", "content": answer})
 
+        token_usage = data.get("token_usage") or {}
         write_audit_entry(
             task_id=task_id, user_id=user_id,
             task_type=data.get("task_type") or ("chat" if chat_id else "unknown"),
             model_used=data.get("model_used") or "none",
             file_uploaded=file_base64 is not None,
+            client_ip=client_ip,
+            prompt_tokens=token_usage.get("prompt_tokens"),
+            completion_tokens=token_usage.get("completion_tokens"),
         )

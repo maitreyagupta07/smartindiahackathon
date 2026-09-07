@@ -9,7 +9,7 @@ import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -115,12 +115,13 @@ async def chat_upload(chat_id: str, req: ChatUploadRequest):
 
 
 @router.post("/api/chat/{chat_id}/message")
-async def chat_message(chat_id: str, req: ChatMessageRequest):
+async def chat_message(chat_id: str, req: ChatMessageRequest, request: Request):
     chat_id = _valid_chat_id(chat_id)
     if not req.prompt or not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt is required")
 
     task_id = str(uuid.uuid4())
+    client_ip = request.client.host if request.client else None
 
     async with CHAT_LOCK:
         chat = CHATS.setdefault(chat_id, new_chat(chat_id, req.chat_title))
@@ -140,6 +141,8 @@ async def chat_message(chat_id: str, req: ChatMessageRequest):
             "error": None,
             "models_used": None,
             "steps": None,
+            "token_usage": None,
+            "client_ip": client_ip,
             "_user_id": req.user_id,
             "_file_uploaded": req.file_base64 is not None,
             "_chat_id": chat_id,
@@ -148,7 +151,7 @@ async def chat_message(chat_id: str, req: ChatMessageRequest):
     asyncio.create_task(dispatch_to_agent(
         task_id=task_id, prompt=req.prompt, user_id=req.user_id,
         file_base64=req.file_base64, file_mime_type=req.file_mime_type,
-        chat_id=chat_id, history=history,
+        chat_id=chat_id, history=history, client_ip=client_ip,
     ))
 
     return JSONResponse({"task_id": task_id, "status": "queued", "chat_id": chat_id})

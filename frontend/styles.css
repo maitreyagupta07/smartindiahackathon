@@ -427,7 +427,7 @@ input, select { font-family: inherit; }
 
 /* ---- Admin ---- */
 .admin-badge { padding: 2px 8px; border-radius: 4px; background: var(--accent-wash); color: var(--accent); font-size: 10px; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em; }
-.stats-row { display: flex; background: var(--elevated-surface); border: 1px solid var(--border-subtle); border-radius: 10px; }
+.stats-row, .stat-grid { display: flex; background: var(--elevated-surface); border: 1px solid var(--border-subtle); border-radius: 10px; }
 .stat-block { flex: 1; padding: 18px 20px; border-right: 1px solid var(--border-subtle); }
 .stat-block:last-child { border-right: none; }
 .stat-block .label { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
@@ -754,3 +754,95 @@ tbody td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 .drop-hint-inner small { font-size: 11.5px; color: var(--text-muted); }
 
 [hidden], .hidden { display: none !important; }
+
+/* ============================================================
+   Mobile / small-viewport layout
+   ============================================================
+   Desktop stays exactly as designed — everything below only kicks in
+   under 860px. The one structural change is the sidebar: it becomes an
+   off-canvas drawer (slides in over the content, backdrop behind it)
+   instead of a permanent column, toggled by the hamburger button added
+   to both index.html's and admin.html's topbar (see app.js's
+   initSidebarToggle — hidden entirely on desktop below). */
+.sidebar-toggle { display: none; }
+.sidebar-backdrop {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+  z-index: 29; opacity: 0; visibility: hidden; transition: opacity .2s ease;
+}
+.sidebar-backdrop.open { opacity: 1; visibility: visible; }
+
+@media (max-width: 860px) {
+  .sidebar-toggle { display: flex; }
+
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 31;
+    width: 260px; max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform .22s cubic-bezier(0.16,1,0.3,1);
+    box-shadow: 8px 0 32px var(--shadow-lg);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop { display: block; }
+
+  /* Bigger touch targets throughout the sidebar and topbar. */
+  .nav-item, .task-sidebar-item { padding: 10px 12px; font-size: 14px; }
+  .icon-btn { width: 38px; height: 38px; }
+
+  /* ---- User workbench ---- */
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar-left { gap: 8px; min-width: 0; }
+  .topbar-left .task-title, #topbar-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+  .topbar-right { gap: 2px; }
+
+  .idle-view, .conversation-scroll { padding-left: 14px; padding-right: 14px; }
+  .idle-inner h1 { font-size: 21px; margin-bottom: 22px; }
+  .conversation-inner { gap: 24px; }
+  .msg-user .bubble { max-width: 92%; }
+
+  .composer-dock { padding: 0 12px 16px; }
+  .composer-inner { max-width: 100%; }
+  /* 16px stops iOS Safari auto-zooming the page when a text input is focused. */
+  .composer-bar input[type=text] { font-size: 16px; }
+
+  .deliverable-card { flex-wrap: wrap; }
+  .task-meta-row { gap: 10px; }
+
+  /* ---- Maximized activity map: same horizontal chain, scrolls on touch
+     instead of trying to cram every node into a narrow screen. ---- */
+  .graph-canvas { padding: 24px 16px; -webkit-overflow-scrolling: touch; }
+  .node-card { width: 148px; padding: 11px; }
+  .dash-connector { width: 32px; }
+  .graph-header { padding: 0 12px; }
+  .graph-header-left .title { max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .drawer { width: 100%; max-width: 100vw; }
+
+  /* ---- Admin ---- */
+  .stats-row, .stat-grid { flex-direction: column; }
+  .stats-row .stat-block, .stat-grid .stat-block { border-right: none; border-bottom: 1px solid var(--border-subtle); }
+  .stats-row .stat-block:last-child, .stat-grid .stat-block:last-child { border-bottom: none; }
+
+  /* Tables scroll horizontally on their own rather than clipping or
+     squeezing every column onto a phone screen. */
+  .panel { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+  table { min-width: 560px; }
+
+  .filter-row { flex-direction: column; align-items: stretch; }
+  .filter-left { width: 100%; }
+  .search-input { max-width: none; }
+
+  .arch-diagram { padding-bottom: 4px; }
+  .arch-node { min-width: 160px; }
+
+  .admin-login-card { padding: 24px 20px; }
+
+  .demo-badge { left: 14px; right: 14px; justify-content: center; }
+  .toast { left: 14px; right: 14px; transform: translateY(-12px); max-width: none; }
+  .toast.show { transform: translateY(0); }
+}
+
+@media (max-width: 480px) {
+  .idle-inner h1 { font-size: 19px; }
+  .node-card { width: 132px; }
+  .drawer-header, .drawer-body { padding: 14px; }
+}

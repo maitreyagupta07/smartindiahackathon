@@ -21,6 +21,7 @@ async def call_inference(
     prompt: str,
     image_base64: str | None = None,
     temperature: float | None = None,
+    usage: dict | None = None,
 ) -> str:
     # Base shape is exactly contract §2.5's request — {model, prompt, images?,
     # stream}. `options.temperature` is an Ollama-supported addition, only
@@ -41,4 +42,13 @@ async def call_inference(
         resp.raise_for_status()
         data = resp.json()
         print(f"[INFERENCE_CLIENT] <- model={model} response_preview={str(data.get('response'))[:120]!r}")
+        # Ollama's own real token counts (confirmed present on a non-streaming
+        # /api/generate response: prompt_eval_count, eval_count) — never
+        # estimated. `usage` is an optional out-param (return type here stays
+        # plain `str` so every existing caller/test mocking a string return
+        # value is unaffected) that the agent loop fills in for real usage
+        # tracking (see app/agent/state.py's token_totals).
+        if usage is not None:
+            usage["prompt_tokens"] = data.get("prompt_eval_count")
+            usage["completion_tokens"] = data.get("eval_count")
         return data["response"]

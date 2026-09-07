@@ -267,4 +267,32 @@ const AdminAuth = {
   },
 };
 
-document.addEventListener('DOMContentLoaded', () => Theme.init());
+/**
+ * Mobile sidebar drawer — shared by both index.html and admin.html, since
+ * both use the same .app-shell/.sidebar/.sidebar-backdrop structure. On
+ * desktop the toggle button is hidden entirely (see the mobile media query
+ * in styles.css), so this only ever does anything on a narrow viewport.
+ */
+function initSidebarToggle() {
+  const toggle = document.getElementById('sidebar-toggle');
+  const sidebar = document.querySelector('.sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  if (!toggle || !sidebar || !backdrop) return;
+
+  const close = () => { sidebar.classList.remove('open'); backdrop.classList.remove('open'); };
+  const open = () => { sidebar.classList.add('open'); backdrop.classList.add('open'); };
+
+  toggle.addEventListener('click', () => {
+    sidebar.classList.contains('open') ? close() : open();
+  });
+  backdrop.addEventListener('click', close);
+  // Picking anything in the sidebar (a chat, a nav tab, "New Chat", …)
+  // should close the drawer on mobile — otherwise it just sits open over
+  // the page you meant to see.
+  sidebar.addEventListener('click', (e) => {
+    if (e.target.closest('a, button')) close();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+}
+
+document.addEventListener('DOMContentLoaded', () => { Theme.init(); initSidebarToggle(); });

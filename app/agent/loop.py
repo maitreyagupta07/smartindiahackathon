@@ -95,15 +95,18 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                         f"-> call_qwen"
                     )
                 try:
+                    usage: dict = {}
                     response_text = await call_inference(
                         model=next_step.model,
                         prompt=sent_prompt,
                         image_base64=next_step.image_base64,
                         temperature=next_step.temperature,
+                        usage=usage,
                     )
                     print(
                         f"[LOOP] task_id={state.task_id} model={next_step.model} "
-                        f"response_preview={str(response_text)[:120]!r}"
+                        f"response_preview={str(response_text)[:120]!r} "
+                        f"tokens=prompt:{usage.get('prompt_tokens')}/completion:{usage.get('completion_tokens')}"
                     )
                     state.add_step(
                         action=next_step.action,
@@ -111,6 +114,8 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                         prompt_used=next_step.prompt,
                         observation=response_text,
                         status="ok",
+                        prompt_tokens=usage.get("prompt_tokens"),
+                        completion_tokens=usage.get("completion_tokens"),
                     )
                 except Exception as step_exc:  # noqa: BLE001
                     print(f"[LOOP] task_id={state.task_id} model={next_step.model} ERROR: {step_exc}")
@@ -204,6 +209,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 error=state.error,
                 models_used=state.models_used or None,
                 steps=state.step_summary or None,
+                token_usage=state.token_totals,
             )
 
         # File-generation tasks finalize straight off generate_file's
@@ -232,6 +238,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 error=None,
                 models_used=state.models_used or None,
                 steps=state.step_summary or None,
+                token_usage=state.token_totals,
             )
 
         # The LoRA adapter sometimes writes markdown-style **bold** into its
@@ -251,6 +258,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             error=None,
             models_used=state.models_used or None,
             steps=state.step_summary or None,
+            token_usage=state.token_totals,
         )
 
     except Exception as exc:  # noqa: BLE001
@@ -263,4 +271,5 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             error=str(exc),
             models_used=state.models_used or None,
             steps=state.step_summary or None,
+            token_usage=state.token_totals,
         )

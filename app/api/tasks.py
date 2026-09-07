@@ -7,7 +7,7 @@ import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -26,9 +26,14 @@ class SubmitTaskRequest(BaseModel):
 
 
 @router.post("/api/submit-task")
-async def submit_task(req: SubmitTaskRequest):
+async def submit_task(req: SubmitTaskRequest, request: Request):
     task_id = str(uuid.uuid4())
     file_uploaded = req.file_base64 is not None
+    # The real, actual IP FastAPI/Starlette saw this request come from — not
+    # anything the client claims about itself. This is what makes "which
+    # employee/machine is this" trustworthy for the admin view: it's a fact
+    # about the TCP connection, not a value the browser sent us.
+    client_ip = request.client.host if request.client else None
 
     async with TASK_LOCK:
         TASKS[task_id] = {
@@ -41,6 +46,8 @@ async def submit_task(req: SubmitTaskRequest):
             "error": None,
             "models_used": None,
             "steps": None,
+            "token_usage": None,
+            "client_ip": client_ip,
             "_user_id": req.user_id,
             "_file_uploaded": file_uploaded,
         }
@@ -52,6 +59,7 @@ async def submit_task(req: SubmitTaskRequest):
         user_id=req.user_id,
         file_base64=req.file_base64,
         file_mime_type=req.file_mime_type,
+        client_ip=client_ip,
     ))
 
     return JSONResponse({"task_id": task_id, "status": "queued"})
@@ -73,6 +81,8 @@ async def task_status(task_id: str):
             "error": task["error"],
             "models_used": task.get("models_used"),
             "steps": task.get("steps"),
+            "token_usage": task.get("token_usage"),
+            "client_ip": task.get("client_ip"),
         }
 
 

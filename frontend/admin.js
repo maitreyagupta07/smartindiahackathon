@@ -99,6 +99,76 @@ function renderUsers(entries) {
   `).join('');
 }
 
+/* Live Client Connections & Token Usage (Security & Sovereignty tab) — real
+   data straight from the audit log: the actual source IP FastAPI recorded
+   for each request (app/api/tasks.py's request.client.host, not a value the
+   browser sent), and real token counts from Ollama's own response
+   (prompt_eval_count/eval_count, see app/inference/client.py). Never
+   estimated — a task predating this feature just shows blank IP/tokens. */
+function isLocalOrPrivateIp(ip) {
+  if (!ip) return true; // unknown -> don't false-flag it as external
+  if (ip === '127.0.0.1' || ip === '::1' || ip.startsWith('127.')) return true;
+  if (ip.startsWith('10.') || ip.startsWith('192.168.')) return true;
+  const m = ip.match(/^172\.(\d+)\./);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true; // 172.16.0.0/12
+  return false;
+}
+
+function renderNetworkUsage(entries) {
+  const tbody = document.getElementById('network-usage-tbody');
+  const emptyEl = document.getElementById('network-usage-empty');
+  if (!tbody) return; // section not on this page load
+
+  const byUser = {};
+  const uniqueIps = new Set();
+  const nonLocalIps = new Set();
+  let totalTokens = 0;
+
+  entries.forEach((e) => {
+    const key = e.user_id || 'unknown';
+    if (!byUser[key]) byUser[key] = { ip: null, requests: 0, promptTokens: 0, completionTokens: 0, lastSeen: e.timestamp };
+    const u = byUser[key];
+    u.requests += 1;
+    if (e.client_ip) {
+      u.ip = e.client_ip; // most recent wins (entries are appended in order)
+      uniqueIps.add(e.client_ip);
+      if (!isLocalOrPrivateIp(e.client_ip)) nonLocalIps.add(e.client_ip);
+    }
+    u.promptTokens += e.prompt_tokens || 0;
+    u.completionTokens += e.completion_tokens || 0;
+    totalTokens += (e.prompt_tokens || 0) + (e.completion_tokens || 0);
+    if (String(e.timestamp).localeCompare(String(u.lastSeen)) > 0) u.lastSeen = e.timestamp;
+  });
+
+  const statIps = document.getElementById('stat-unique-ips');
+  const statNonLocal = document.getElementById('stat-nonlocal-ips');
+  const statTokens = document.getElementById('stat-total-tokens');
+  if (statIps) statIps.textContent = uniqueIps.size.toLocaleString();
+  if (statNonLocal) {
+    statNonLocal.textContent = nonLocalIps.size.toLocaleString();
+    statNonLocal.style.color = nonLocalIps.size > 0 ? 'var(--error)' : 'var(--success)';
+  }
+  if (statTokens) statTokens.textContent = totalTokens.toLocaleString();
+
+  const rows = Object.entries(byUser).sort((a, b) => b[1].requests - a[1].requests);
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    if (emptyEl) emptyEl.hidden = false;
+    return;
+  }
+  if (emptyEl) emptyEl.hidden = true;
+  tbody.innerHTML = rows.map(([userId, u]) => `
+    <tr>
+      <td>${escapeHtml(userId)}</td>
+      <td class="mono">${u.ip ? escapeHtml(u.ip) + (isLocalOrPrivateIp(u.ip) ? '' : ' <span style="color:var(--error)">(non-local!)</span>') : '<span style="color:var(--text-muted)">unknown</span>'}</td>
+      <td class="num">${u.requests}</td>
+      <td class="num mono">${u.promptTokens.toLocaleString()}</td>
+      <td class="num mono">${u.completionTokens.toLocaleString()}</td>
+      <td class="num">${escapeHtml(formatTs(u.lastSeen))}</td>
+    </tr>
+  `).join('');
+}
+
 function renderComplianceView(entries) {
   const tbody = document.getElementById('compliance-tbody');
   const emptyEl = document.getElementById('compliance-empty');
@@ -263,27 +333,32 @@ async function loadAuditLog() {
   renderStats(AUDIT_ENTRIES);
   renderOverviewPreview(AUDIT_ENTRIES);
   renderUsers(AUDIT_ENTRIES);
+  renderNetworkUsage(AUDIT_ENTRIES);
   renderComplianceView(AUDIT_ENTRIES);
   applyFiltersAndRender();
 }
 
 function demoAuditEntries() {
   const now = Date.now();
-  const mk = (i, type, model, file) => ({
+  const ips = ['192.168.1.42', '192.168.1.57', '10.0.0.2'];
+  const mk = (i, type, model, file, promptTok, compTok) => ({
     task_id: `demo-${1000 + i}`,
     user_id: ['u-a1b2c3', 'u-x7y8z9', 'u-m4n5o6'][i % 3],
     task_type: type,
     model_used: model,
     timestamp: new Date(now - i * 3600_000).toISOString(),
     file_uploaded: file,
+    client_ip: ips[i % 3],
+    prompt_tokens: promptTok,
+    completion_tokens: compTok,
   });
   return [
-    mk(0, 'document-generation', 'approval-note-lora', true),
-    mk(1, 'text-generation', 'qwen2.5:1.5b-instruct', false),
-    mk(2, 'vision', 'moondream', true),
-    mk(3, 'code-execution', 'qwen2.5:1.5b-instruct', false),
-    mk(4, 'doc-search', 'qwen2.5:1.5b-instruct', false),
-    mk(5, 'document-generation', 'qwen2.5:1.5b-instruct', true),
+    mk(0, 'document-generation', 'approval-note-lora', true, 210, 340),
+    mk(1, 'text-generation', 'qwen2.5:1.5b-instruct', false, 18, 52),
+    mk(2, 'vision', 'moondream', true, 40, 88),
+    mk(3, 'code-execution', 'qwen2.5:1.5b-instruct', false, 65, 120),
+    mk(4, 'doc-search', 'qwen2.5:1.5b-instruct', false, 95, 60),
+    mk(5, 'document-generation', 'qwen2.5:1.5b-instruct', true, 180, 410),
   ];
 }
 

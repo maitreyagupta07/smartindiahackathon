@@ -54,3 +54,11 @@ class ExecuteTaskResponse(BaseModel):
     # guess. See app/agent/state.py's models_used/step_summary properties.
     models_used: Optional[list[str]] = None
     steps: Optional[list[dict]] = None
+    # token_usage: REAL counts from Ollama's own response (prompt_eval_count/
+    # eval_count — see app/inference/client.py), never estimated. Was
+    # previously "not exposed by the current backend contract" in the
+    # frontend — it turns out Ollama already reports it, so this fills that
+    # gap rather than fabricating a number. {"prompt_tokens", "completion_tokens",
+    # "total_tokens"}, all 0 for a task with no model call (e.g. pure doc-search
+    # that only hit a tool) or if Ollama's response omitted the fields.
+    token_usage: Optional[dict] = None

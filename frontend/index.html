@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign AI Workbench</title>
-<link rel="stylesheet" href="styles.css?v=20260907">
+<link rel="stylesheet" href="styles.css?v=20260908">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -55,6 +55,7 @@
       </a>
     </div>
   </aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 
   <!-- Main -->
   <main class="main" id="main-view">
@@ -62,6 +63,9 @@
 
     <header class="topbar">
       <div class="topbar-left">
+        <button class="icon-btn sidebar-toggle" id="sidebar-toggle" title="Menu">
+          <iconify-icon icon="lucide:menu"></iconify-icon>
+        </button>
         <span id="topbar-task-title">Workspace</span>
         <span class="mono task-id" id="topbar-task-id"></span>
       </div>
@@ -174,8 +178,8 @@
   </div>
 </div>
 
-<script src="app.js?v=20260907"></script>
-<script src="user.js?v=20260907"></script>
+<script src="app.js?v=20260908"></script>
+<script src="user.js?v=20260908"></script>
 <script src="jerry.js?v=20260907"></script>
 <script>
   document.getElementById('sidebar-user-id').textContent = Store.USER_ID;
