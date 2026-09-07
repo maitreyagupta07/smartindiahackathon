@@ -24,7 +24,7 @@ from typing import Optional
 from . import sandbox
 from . import docsearch
 from . import filegen
-from . import pdf_ingest
+from . import doc_extract
 
 
 class DocumentIngestError(Exception):
@@ -36,7 +36,18 @@ class DocumentIngestError(Exception):
 async def execute_code(code: str, language: str = "python") -> dict:
     """Contract §2.6 shape: {"stdout": str, "stderr": str, "exit_code": int}."""
     print(f"[TOOLS] execute_code language={language}")
-    result = await asyncio.to_thread(sandbox.run_code, code, language)
+    try:
+        result = await asyncio.to_thread(sandbox.run_code, code, language)
+    except sandbox.SandboxUnavailable as e:
+        # Docker isn't running on this machine — degrade gracefully instead
+        # of failing the whole task. The agent still finalizes (with the
+        # code shown as text); it just isn't actually executed here.
+        print(f"[TOOLS] execute_code SANDBOX UNAVAILABLE: {e}")
+        return {
+            "stdout": "",
+            "stderr": "(execution skipped: sandbox unavailable on this host)",
+            "exit_code": 127,
+        }
     print(f"[TOOLS] execute_code done exit_code={result.get('exit_code')}")
     return result
 
@@ -68,17 +79,22 @@ def _ingest_document_sync(
     document_id: Optional[str],
     chat_title: Optional[str],
 ) -> dict:
-    if not pdf_ingest.is_pdf(mime_type, filename):
+    # doc_extract covers PDF (via pdf_ingest's two-stage direct-text/OCR
+    # path) plus Word/PowerPoint/Excel/plain-text — one "page" per real
+    # page/slide/sheet, same [(page_number, page_text), ...] shape either
+    # way, so nothing downstream (docsearch.ingest_chat_document) changes.
+    if not doc_extract.is_supported(mime_type, filename):
         raise DocumentIngestError(
-            f"unsupported file type {mime_type or filename!r} — only PDF is supported"
+            f"unsupported file type {mime_type or filename!r} — supported: "
+            f"{doc_extract.describe_supported()}"
         )
     try:
-        pages = pdf_ingest.extract_pdf_pages(file_base64)
-    except pdf_ingest.PdfExtractionError as e:
-        raise DocumentIngestError(f"could not read PDF: {e}")
+        pages = doc_extract.extract_pages(file_base64, mime_type, filename)
+    except doc_extract.DocExtractionError as e:
+        raise DocumentIngestError(f"could not read document: {e}")
     if not pages:
         raise DocumentIngestError(
-            "no extractable text found in PDF (empty, or a scanned PDF with no OCR available)"
+            "no extractable text found in the document (it may be empty, or a scan with no OCR available)"
         )
     return docsearch.ingest_chat_document(
         chat_id=chat_id, filename=filename, pages=pages,

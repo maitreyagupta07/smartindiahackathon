@@ -168,6 +168,8 @@ function renderConversation() {
 
   const inner = document.getElementById('conversation-inner');
   inner.innerHTML = chatMessages.map(renderTurn).join('');
+  wireCopyButtons();
+  startWorkingTicker();
   const scroller = document.getElementById('conversation-scroll');
   if (scroller) scroller.scrollTop = scroller.scrollHeight;
 }
@@ -212,7 +214,7 @@ function renderTurn(turn) {
     return `<div class="msg-ai"><div class="error-banner"><iconify-icon icon="lucide:alert-triangle" style="font-size:16px;flex-shrink:0;margin-top:1px"></iconify-icon><div>${escapeHtml(turn.error || 'The request failed.')}</div></div>${turn.task_id ? taskMetaRow(turn) : ''}</div>`;
   }
   if (turn.status !== 'completed') {
-    return `<div class="msg-ai"><p class="summary-text" style="color:var(--text-muted)">Working on it${LIVE_BACKEND ? '' : ' (demo simulation)'}…</p></div>`;
+    return `<div class="msg-ai">${workingLineHtml()}</div>`;
   }
 
   const chip = turn.model_used
@@ -238,7 +240,11 @@ function renderTurn(turn) {
         </div>
       </div>`;
   } else if (result.text) {
-    body = `<p class="summary-text">${escapeHtml(result.text)}</p>${renderSources(result.sources)}`;
+    body = `<div class="ai-rich">${renderRichText(result.text)}</div>${renderSources(result.sources)}` +
+      `<div class="answer-actions">` +
+      `<button class="copy-answer-btn" data-copy-text="${escapeHtml(answerToPlainText(result.text))}">` +
+      `<iconify-icon icon="lucide:copy" style="font-size:13px"></iconify-icon><span class="label">Copy answer</span></button>` +
+      `</div>`;
   } else {
     body = `<p class="summary-text" style="color:var(--text-muted)">Completed with no returned content.</p>`;
   }
@@ -448,17 +454,54 @@ function initComposer() {
     syncFilePreview();
   });
 
+  // Drag-and-drop attach anywhere over the main pane.
+  const mainView = document.getElementById('main-view');
+  let dragDepth = 0;
+  const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  mainView.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); dragDepth++; mainView.classList.add('drag-over');
+  });
+  mainView.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+  });
+  mainView.addEventListener('dragleave', (e) => {
+    if (!hasFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) mainView.classList.remove('drag-over');
+  });
+  mainView.addEventListener('drop', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    dragDepth = 0; mainView.classList.remove('drag-over');
+    pendingFile = e.dataTransfer.files[0];
+    fileInput.value = '';
+    syncFilePreview();
+    (chatMessages.length ? dockedInput : idleInput).focus();
+  });
+
   function setSendEnabled(on) {
     idleSend.disabled = !on; dockedSend.disabled = !on;
+  }
+
+  const KB_EXTS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.md'];
+  const IMG_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
+  function fileKind(file) {
+    const n = (file.name || '').toLowerCase();
+    if ((file.type || '').startsWith('image/') || IMG_EXTS.some((e) => n.endsWith(e))) return 'image';
+    if (KB_EXTS.some((e) => n.endsWith(e))) return 'doc';
+    return 'other';
   }
 
   async function handleUpload(file) {
     ensureChat();
     const file_name = file.name;
-    const file_mime_type = file.type || (file_name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : null);
+    const lname = file_name.toLowerCase();
+    const file_mime_type = file.type || (lname.endsWith('.pdf') ? 'application/pdf' : null);
 
-    if (file_mime_type !== 'application/pdf' && !file_name.toLowerCase().endsWith('.pdf')) {
-      chatMessages.push({ role: 'system', kind: 'upload-error', filename: file_name, message: 'Only PDF files can be added to the Knowledge Base.' });
+    if (!KB_EXTS.some((e) => lname.endsWith(e))) {
+      chatMessages.push({ role: 'system', kind: 'upload-error', filename: file_name, message: 'Knowledge Base files must be PDF, Word, PowerPoint, Excel, or text. Attach images directly to a message instead.' });
       persistCurrentChat(); renderConversation(); renderTaskSidebar();
       return;
     }
@@ -485,12 +528,12 @@ function initComposer() {
     persistCurrentChat(); renderConversation(); renderTaskSidebar();
   }
 
-  async function handleMessage(prompt) {
+  async function handleMessage(prompt, attachment = null) {
     ensureChat();
     const submitted_at_client = new Date().toISOString();
     if (!currentChatTitle) currentChatTitle = truncate(prompt, 40);
 
-    chatMessages.push({ role: 'user', prompt });
+    chatMessages.push({ role: 'user', prompt, file_name: attachment ? attachment.file_name : undefined });
     const assistantTurn = {
       role: 'assistant', status: 'processing', task_id: null,
       model_used: null, started_at: submitted_at_client, completed_at: null,
@@ -520,6 +563,9 @@ function initComposer() {
     try {
       const res = await Api.chatMessage(currentChatId, {
         user_id: Store.USER_ID, prompt, chat_title: currentChatTitle,
+        file_base64: attachment ? attachment.file_base64 : null,
+        file_mime_type: attachment ? attachment.file_mime_type : null,
+        file_name: attachment ? attachment.file_name : null,
       });
       assistantTurn.task_id = res.task_id;
       currentTask.task_id = res.task_id;
@@ -548,8 +594,17 @@ function initComposer() {
     syncFilePreview();
 
     try {
-      if (file) await handleUpload(file);
-      if (prompt) await handleMessage(prompt);
+      if (file && fileKind(file) === 'image') {
+        const file_base64 = await fileToBase64(file);
+        await handleMessage(prompt || 'Describe this image.', {
+          file_base64,
+          file_mime_type: file.type || 'image/png',
+          file_name: file.name,
+        });
+      } else {
+        if (file) await handleUpload(file);
+        if (prompt) await handleMessage(prompt);
+      }
     } catch (err) {
       toast(`Something went wrong: ${err.message}`, true);
     } finally {
@@ -965,6 +1020,158 @@ const GradientPicker = {
 function truncate(str, n) { return !str ? '' : str.length > n ? str.slice(0, n - 1) + '…' : str; }
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ============================================================
+   "Working" verbs — rotated while a task is in flight so the
+   UI reads as alive and a little playful, but stays professional.
+   ============================================================ */
+const WORKING_PHRASES = [
+  'Reading the request', 'Classifying the task', 'Choosing a model',
+  'Consulting the knowledge base', 'Reasoning it through', 'Connecting the dots',
+  'Drafting a response', 'Running the numbers', 'Checking the sources',
+  'Tightening the wording', 'Cross-checking the details', 'Putting it together',
+  'Almost there', 'Polishing the answer',
+];
+let _workingIdx = 0;
+let _workingTimer = null;
+function startWorkingTicker() {
+  if (_workingTimer) return;
+  _workingTimer = setInterval(() => {
+    const nodes = document.querySelectorAll('[data-working-verb]');
+    if (!nodes.length) return;
+    _workingIdx = (_workingIdx + 1) % WORKING_PHRASES.length;
+    nodes.forEach((n) => { n.textContent = WORKING_PHRASES[_workingIdx] + '…'; });
+  }, 1900);
+}
+function workingLineHtml() {
+  const verb = WORKING_PHRASES[_workingIdx] + '…';
+  const demo = LIVE_BACKEND ? '' : ' <span style="opacity:.7">(demo simulation)</span>';
+  return `<span class="working-line"><span class="spark"></span><span class="verb" data-working-verb>${verb}</span>${demo}</span>`;
+}
+
+/* ============================================================
+   Minimal, safe Markdown -> HTML for AI answers. Escapes first,
+   then re-introduces a limited, known set of tags. Gives results
+   real structure (headings, lists, spacing) and pulls fenced code
+   into a compact, scrollable box with its own copy button.
+   ============================================================ */
+function renderRichText(src) {
+  const raw = String(src || '').replace(/\r\n/g, '\n');
+  const codeBlocks = [];
+  // Pull out ```fenced``` code first so its contents are never marked up.
+  let text = raw.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const i = codeBlocks.push({ lang: (lang || '').trim(), code: code.replace(/\n$/, '') }) - 1;
+    return ` CODE${i} `;
+  });
+
+  text = escapeHtml(text);
+
+  const inline = (s) => s
+    .replace(/`([^`]+)`/g, '<code class="inline">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  const lines = text.split('\n');
+  let html = '';
+  let listType = null; // 'ul' | 'ol'
+  let para = [];
+  const flushPara = () => {
+    if (!para.length) return;
+    html += `<p>${inline(para.join(' '))}</p>`;
+    para = [];
+  };
+  const closeList = () => { if (listType) { html += `</${listType}>`; listType = null; } };
+
+  for (const line of lines) {
+    const codeMatch = line.match(/^ CODE(\d+) $/);
+    if (codeMatch) {
+      flushPara(); closeList();
+      const b = codeBlocks[Number(codeMatch[1])];
+      html += `<div class="code-box"><div class="code-box-head"><span>${escapeHtml(b.lang || 'code')}</span>` +
+        `<button class="mini-copy" data-copy-text="${escapeHtml(b.code)}"><iconify-icon icon="lucide:copy" style="font-size:12px"></iconify-icon>Copy</button></div>` +
+        `<pre><code>${escapeHtml(b.code)}</code></pre></div>`;
+      continue;
+    }
+    const t = line.trim();
+    if (!t) { flushPara(); closeList(); continue; }
+
+    let m;
+    if ((m = t.match(/^(#{1,6})\s+(.*)$/))) {
+      flushPara(); closeList();
+      const level = m[1].length <= 2 ? 3 : 4;
+      html += `<h${level}>${inline(m[2])}</h${level}>`;
+    } else if (/^([-*_])\1{2,}$/.test(t)) {
+      flushPara(); closeList(); html += '<hr>';
+    } else if ((m = t.match(/^[-*•]\s+(.*)$/))) {
+      flushPara();
+      if (listType !== 'ul') { closeList(); html += '<ul>'; listType = 'ul'; }
+      html += `<li>${inline(m[1])}</li>`;
+    } else if ((m = t.match(/^\d+[.)]\s+(.*)$/))) {
+      flushPara();
+      if (listType !== 'ol') { closeList(); html += '<ol>'; listType = 'ol'; }
+      html += `<li>${inline(m[1])}</li>`;
+    } else if ((m = t.match(/^>\s?(.*)$/))) {
+      flushPara(); closeList();
+      html += `<blockquote>${inline(m[1])}</blockquote>`;
+    } else {
+      if (listType) closeList();
+      para.push(t);
+    }
+  }
+  flushPara(); closeList();
+
+  // Lead-in emphasis on the opening paragraph for an intro/body/conclusion feel.
+  html = html.replace(/^<p>/, '<p class="lead">');
+  return html;
+}
+
+/** Clean plain-text version of an answer for the "Copy" button. */
+function answerToPlainText(src) {
+  return String(src || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/```[\w+-]*\n?([\s\S]*?)```/g, (_, code) => '\n' + code.replace(/\n$/, '') + '\n')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*•]\s+/gm, '• ')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '$1 ($2)')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch { return false; }
+  }
+}
+
+/** Wire up every copy control currently in the conversation DOM. */
+function wireCopyButtons() {
+  document.querySelectorAll('.copy-answer-btn, .mini-copy').forEach((btn) => {
+    if (btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', async () => {
+      const ok = await copyToClipboard(btn.dataset.copyText || '');
+      const label = btn.querySelector('.label');
+      btn.classList.toggle('copied', ok);
+      if (label) { const prev = label.textContent; label.textContent = ok ? 'Copied' : 'Press ⌘C'; setTimeout(() => { label.textContent = prev; btn.classList.remove('copied'); }, 1600); }
+      else { setTimeout(() => btn.classList.remove('copied'), 1600); }
+      if (!ok) toast('Could not access the clipboard — select and copy manually.', true);
+    });
+  });
 }
 
 /* ---------- Init ---------- */

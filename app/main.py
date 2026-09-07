@@ -18,6 +18,7 @@ inference client — is invoked as plain Python, in-process, EXCEPT:
 No other internal service is exposed. The browser talks ONLY to this app.
 """
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .api.errors import install_error_handlers
@@ -29,10 +30,31 @@ from .storage.config import FILES_DIR, REPO_ROOT
 app = FastAPI(title="Sovereign On-Premise Agentic AI Workbench")
 install_error_handlers(app)
 
+# The real deployment always serves the frontend from this same app (same
+# origin, so no CORS is actually needed for it). This middleware exists
+# purely so a developer can preview frontend/ from a separate local static
+# server (Live Server, `python -m http.server`, etc.) during frontend work
+# without a CORS error — localhost/127.0.0.1 only, never the LAN, so it
+# doesn't loosen anything about what the LAN itself can reach.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(tasks_router)
 app.include_router(chat_router)
 
 init_db()
+
+
+@app.get("/health")
+async def health():
+    """Liveness check for run.sh/monitoring — not part of the frozen §2.3/§2.4 contract."""
+    return {"status": "ok"}
+
 
 # Generated-file serving (§2.7a) — one physical directory, one URL prefix.
 app.mount("/files", StaticFiles(directory=str(FILES_DIR)), name="files")

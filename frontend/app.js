@@ -28,11 +28,26 @@ const Theme = {
   },
 };
 
-/* Backend contract per MASTER_BUILD_GUIDE.md §2.3 — the ONLY API this frontend calls.
-   Relative paths so this works whether served by backend/main.py (port 8000) or
-   proxied; API_BASE can be overridden for local static-preview testing. */
-const API_BASE = window.SOVEREIGN_API_BASE || '';
-
+/* Base URL of the Person B backend API (config.json ports.backend = 8000).
+   NOT the tools service on 8001 — that only serves /tools/*, so every /api/*
+   call 404s against it.
+   - Served BY the backend itself (http://<host>:8000/...): same-origin, so an
+     empty base -> relative URLs, no CORS needed.
+   - Served by a separate static server (Live Server / python -m http.server
+     on :5500, file://, etc): target the backend on :8000 explicitly; the
+     backend's CORSMiddleware allow-lists :5500.
+   Override for anything else with window.SOVEREIGN_API_BASE. */
+const API_BASE = window.SOVEREIGN_API_BASE ?? (() => {
+  if (location.port === '8000') return '';  // served by the backend itself -> same-origin
+  // Force 127.0.0.1, never the literal "localhost": on Windows "localhost"
+  // resolves to IPv6 ::1 first, but uvicorn (host="0.0.0.0") only listens on
+  // IPv4, so http://localhost:8000/* fails with "Failed to fetch" while
+  // http://127.0.0.1:8000/* works.
+  const host = (!location.hostname || location.hostname === 'localhost')
+    ? '127.0.0.1'
+    : location.hostname;
+  return `http://${host}:8000`;
+})();
 const Api = {
   async submitTask({ user_id, prompt, file_base64 = null, file_name = null, file_mime_type = null }) {
     const res = await fetch(`${API_BASE}/api/submit-task`, {
@@ -82,11 +97,11 @@ const Api = {
 
   /** Ask a question in a chat. Server keeps recent conversation context and
    *  retrieves only THIS chat's uploaded documents. */
-  async chatMessage(chatId, { user_id, prompt, chat_title = null }) {
+  async chatMessage(chatId, { user_id, prompt, chat_title = null, file_base64 = null, file_mime_type = null, file_name = null }) {
     const res = await fetch(`${API_BASE}/api/chat/${encodeURIComponent(chatId)}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id, prompt, chat_title }),
+      body: JSON.stringify({ user_id, prompt, chat_title, file_base64, file_mime_type, file_name }),
     });
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `message failed (${res.status})`);
@@ -205,6 +220,9 @@ function fileTypeIcon(filename = '') {
   const ext = filename.split('.').pop().toLowerCase();
   if (ext === 'xlsx' || ext === 'xls') return 'lucide:file-spreadsheet';
   if (ext === 'pptx' || ext === 'ppt') return 'lucide:file-sliders';
+  if (ext === 'doc' || ext === 'docx') return 'lucide:file-type';
+  if (ext === 'pdf') return 'lucide:file-text';
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return 'lucide:image';
   return 'lucide:file-text';
 }
 

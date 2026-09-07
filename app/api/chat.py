@@ -32,6 +32,13 @@ class ChatMessageRequest(BaseModel):
     user_id: str
     prompt: str
     chat_title: Optional[str] = None
+    # Optional per-message attachment. Used for images (jpg/png/webp) that go
+    # to the vision model — dispatch_to_agent forwards these to the agent,
+    # whose classifier routes any image mime type to Moondream deterministically
+    # (this happens even inside a chat — see router.py's chat-vs-action logic).
+    file_base64: Optional[str] = None
+    file_mime_type: Optional[str] = None
+    file_name: Optional[str] = None
 
 
 def _valid_chat_id(chat_id: Optional[str]) -> str:
@@ -47,9 +54,23 @@ async def chat_upload(chat_id: str, req: ChatUploadRequest):
     filename = (req.file_name or "").strip()
     if not filename:
         raise HTTPException(status_code=400, detail="file_name is required")
-    is_pdf = (req.file_mime_type == "application/pdf") or filename.lower().endswith(".pdf")
-    if not is_pdf:
-        raise HTTPException(status_code=400, detail="unsupported file type — only PDF uploads are supported")
+    # The Knowledge Base ingests text-bearing documents. Images are not
+    # indexed here — they go straight to a message as a vision attachment
+    # instead (see ChatMessageRequest.file_base64 below).
+    _KB_EXTS = (".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".txt", ".md")
+    lname = filename.lower()
+    if (req.file_mime_type or "").startswith("image/") or lname.endswith(
+        (".png", ".jpg", ".jpeg", ".webp", ".gif")
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="images can't be added to the Knowledge Base — attach the image directly to a message instead",
+        )
+    if not lname.endswith(_KB_EXTS):
+        raise HTTPException(
+            status_code=400,
+            detail="unsupported file type — supported: PDF, Word (.docx), PowerPoint (.pptx), Excel (.xlsx/.xls), text (.txt/.md)",
+        )
     if not req.file_base64:
         raise HTTPException(status_code=400, detail="the uploaded file is empty")
 
@@ -118,12 +139,13 @@ async def chat_message(chat_id: str, req: ChatMessageRequest):
             "result": {"type": None, "text": None, "file_url": None, "file_name": None},
             "error": None,
             "_user_id": req.user_id,
-            "_file_uploaded": False,
+            "_file_uploaded": req.file_base64 is not None,
             "_chat_id": chat_id,
         }
 
     asyncio.create_task(dispatch_to_agent(
         task_id=task_id, prompt=req.prompt, user_id=req.user_id,
+        file_base64=req.file_base64, file_mime_type=req.file_mime_type,
         chat_id=chat_id, history=history,
     ))
 
