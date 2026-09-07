@@ -5,3 +5,9 @@ __pycache__/
 .env
 *.egg-info/
 .pytest_cache/
+
+# macOS junk
+.DS_Store
+
+# run.sh service logs
+.run-logs/
