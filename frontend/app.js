@@ -189,8 +189,105 @@ const Api = {
   },
 };
 
+/**
+ * UserAuth — a lightweight, CLIENT-SIDE-ONLY account gate for the User
+ * workbench, mirroring AdminAuth's own documented pattern (see its comment
+ * above): the locked backend contract has no login/session/account API, so
+ * this is a real UI access gate — accounts are meaningful and persistent on
+ * THIS browser — but not a substitute for real server-side authentication.
+ * If/when the contract adds a real auth endpoint, this module is the only
+ * place that needs to change.
+ *
+ * A signed-in account's chosen User ID becomes Store.USER_ID itself (see
+ * below) — the same identifier already used to key every task, chat, and
+ * this operator's persistent Knowledge Base — so signing in on this browser
+ * again later reliably resumes the same identity instead of a random one.
+ */
+const UserAuth = {
+  ACCOUNTS_KEY: 'sovereign-user-accounts',
+  SESSION_KEY: 'sovereign-user-session',
+  _accounts() {
+    try { return JSON.parse(localStorage.getItem(this.ACCOUNTS_KEY) || '{}'); }
+    catch { return {}; }
+  },
+  _save(accounts) { localStorage.setItem(this.ACCOUNTS_KEY, JSON.stringify(accounts)); },
+  accountExists(userId) { return Object.prototype.hasOwnProperty.call(this._accounts(), userId); },
+  createAccount(userId, password, nickname) {
+    const accounts = this._accounts();
+    accounts[userId] = { password, nickname: (nickname || '').trim() || userId };
+    this._save(accounts);
+  },
+  checkLogin(userId, password) {
+    const acc = this._accounts()[userId];
+    return !!acc && acc.password === password;
+  },
+  nicknameFor(userId) {
+    const acc = this._accounts()[userId];
+    return (acc && acc.nickname) || userId;
+  },
+  startSession(userId) { sessionStorage.setItem(this.SESSION_KEY, userId); },
+  endSession() { sessionStorage.removeItem(this.SESSION_KEY); },
+  isSessionActive() { return !!sessionStorage.getItem(this.SESSION_KEY); },
+  currentUserId() { return sessionStorage.getItem(this.SESSION_KEY); },
+  /** Call at the very top of any user-workbench page. Redirects to the
+   *  login screen immediately if there is no active session for this tab. */
+  guard() {
+    if (!this.isSessionActive()) {
+      const next = encodeURIComponent(location.pathname.split('/').pop() + location.hash);
+      location.replace(`login.html?next=${next}`);
+    }
+  },
+};
+
+/**
+ * Dynamic, nickname-aware idle-view greeting — a few varied, lightly playful
+ * (but still professional) lines per time-of-day bucket, so the workspace
+ * doesn't say the same flat "Hi, Operator" on every visit. Picked once per
+ * page load, not re-rolled on every render, so it doesn't visibly change
+ * out from under the user mid-session.
+ */
+const Greetings = {
+  BUCKETS: {
+    morning: (n) => [
+      `Good morning, ${n} ☀️`,
+      `Morning, ${n} — ready when you are.`,
+      `Rise and shine, ${n}.`,
+    ],
+    afternoon: (n) => [
+      `Good afternoon, ${n}.`,
+      `Hope your day's going well, ${n}.`,
+      `Back at it, ${n}?`,
+    ],
+    evening: (n) => [
+      `Good evening, night owl ${n}.`,
+      `Evening, ${n} — burning the midnight oil?`,
+      `Good evening, ${n}.`,
+    ],
+    lateNight: (n) => [
+      `Coffee and Claude time, ${n}?`,
+      `Still up, ${n}? Let's make it count.`,
+      `Late one tonight, ${n}.`,
+    ],
+  },
+  pick(nickname) {
+    const n = nickname || 'Operator';
+    const h = new Date().getHours();
+    const bucket = h >= 5 && h < 12 ? 'morning'
+      : h >= 12 && h < 17 ? 'afternoon'
+      : h >= 17 && h < 22 ? 'evening'
+      : 'lateNight';
+    const options = this.BUCKETS[bucket](n);
+    return options[Math.floor(Math.random() * options.length)];
+  },
+};
+
 const Store = {
   USER_ID: (() => {
+    // A signed-in account's own chosen User ID always wins — this is what
+    // makes signing in on this browser again resume the same identity
+    // (same chats, same persistent Knowledge Base) instead of a random one.
+    const signedIn = sessionStorage.getItem('sovereign-user-session');
+    if (signedIn) return signedIn;
     let id = localStorage.getItem('sovereign-user-id');
     if (!id) {
       id = 'u-' + Math.random().toString(36).slice(2, 8);
@@ -306,9 +403,14 @@ function routeForModel(modelUsed) {
 const AdminAuth = {
   PASSCODE_KEY: 'sovereign-admin-passcode',
   SESSION_KEY: 'sovereign-admin-session',
+  DEFAULT_PASSCODE: '1230#',
   hasPasscode() { return !!localStorage.getItem(this.PASSCODE_KEY); },
   setPasscode(p) { localStorage.setItem(this.PASSCODE_KEY, p); },
   checkPasscode(p) { return p && p === localStorage.getItem(this.PASSCODE_KEY); },
+  /** Seeds the default admin passcode on first use, so Admin access works
+   *  out of the box with a known passcode instead of demanding first-run
+   *  setup. Call once, before checking hasPasscode()/isFirstRun. */
+  ensureDefaultPasscode() { if (!this.hasPasscode()) this.setPasscode(this.DEFAULT_PASSCODE); },
   isSessionActive() { return sessionStorage.getItem(this.SESSION_KEY) === 'true'; },
   startSession() { sessionStorage.setItem(this.SESSION_KEY, 'true'); },
   endSession() { sessionStorage.removeItem(this.SESSION_KEY); },
