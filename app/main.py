@@ -17,7 +17,7 @@ inference client — is invoked as plain Python, in-process, EXCEPT:
 
 No other internal service is exposed. The browser talks ONLY to this app.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -50,6 +50,22 @@ app.include_router(chat_router)
 app.include_router(knowledge_router)
 
 init_db()
+
+
+@app.middleware("http")
+async def _no_cache_html(request: Request, call_next):
+    """Serve the frontend HTML entry points with `Cache-Control: no-cache`
+    so a browser always revalidates them (StaticFiles' ETag then makes that
+    a cheap 304 when unchanged). Without this, a browser can keep showing a
+    stale index.html — and therefore keep requesting the old ?v= asset URLs
+    — indefinitely after a frontend change ships. Hashed CSS/JS (?v=NNN) are
+    left alone: their URL changes when their content does, so they stay
+    safely cacheable."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.endswith(".html") or path == "/" or "." not in path.rsplit("/", 1)[-1]:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.get("/health")
