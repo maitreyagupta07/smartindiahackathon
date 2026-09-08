@@ -195,13 +195,37 @@ def _extract_code(prompt: str) -> str:
     return prompt.strip()
 
 
-def _detect_file_type(prompt: str) -> str:
+_FILE_TYPE_KEYWORDS = {
+    "xlsx": ("xlsx", "excel", "spreadsheet"),
+    "pptx": ("pptx", "powerpoint", "slide", "presentation"),
+    "docx": ("docx", "word doc", "word document", "word file"),
+}
+
+
+def _detect_requested_file_types(prompt: str) -> list[str]:
+    """
+    Every distinct file format actually named in the prompt, in the order
+    they FIRST appear (position, not a fixed xlsx > pptx > docx priority —
+    that priority order used to mean "...in Word doc, then...Excel..."
+    silently produced an xlsx because "excel" happened to be checked
+    first, regardless of which format the user actually asked for first).
+    Two or more entries here means a genuinely multi-deliverable request —
+    see _detect_file_type's docstring for why that matters.
+    """
     lowered = prompt.lower()
-    if any(kw in lowered for kw in ("xlsx", "excel", "spreadsheet")):
-        return "xlsx"
-    if any(kw in lowered for kw in ("pptx", "powerpoint", "slide", "presentation")):
-        return "pptx"
-    return "docx"  # default per problem statement's approval-note use case
+    found = [(lowered.index(kw), fmt) for fmt, kws in _FILE_TYPE_KEYWORDS.items()
+             for kw in kws if kw in lowered]
+    seen, ordered = set(), []
+    for _, fmt in sorted(found):
+        if fmt not in seen:
+            seen.add(fmt)
+            ordered.append(fmt)
+    return ordered
+
+
+def _detect_file_type(prompt: str) -> str:
+    types = _detect_requested_file_types(prompt)
+    return types[0] if types else "docx"  # default per problem statement's approval-note use case
 
 
 def _build_generate_file_args(prompt: str) -> dict:
@@ -244,15 +268,26 @@ def _text_model(prompt: str) -> str:
     return TEXT_MODEL
 
 
+_COMPUTE_KEYWORD_RE = re.compile(
+    r"\b(" + "|".join(re.escape(kw) for kw in _COMPUTE_KEYWORDS) + r")\b"
+)
+
+
 def _needs_computation(prompt: str) -> bool:
     """
     Heuristic: does this file-generation request depend on real computed/
     numeric data (e.g. "first 20 Fibonacci numbers ... average") rather than
     free-form prose? If so, F should verify the numbers via execute_code
     before preparing file content, instead of trusting Qwen's arithmetic.
+
+    Word-boundary matched, not a bare substring check — "sum" as a plain
+    substring matches inside "summer", so a request like "summarize the
+    summer season" used to false-positive trigger a whole spurious
+    codegen -> execute_code -> content-prep chain for a request with
+    nothing to compute at all (observed live). Same risk existed for
+    "run"/"count" (⊂ "running"/"discount", etc.).
     """
-    lowered = prompt.lower()
-    return any(kw in lowered for kw in _COMPUTE_KEYWORDS)
+    return bool(_COMPUTE_KEYWORD_RE.search(prompt.lower()))
 
 
 def _build_filegen_code_prompt(original_prompt: str) -> str:
@@ -340,9 +375,37 @@ def _build_filegen_content_prompt(original_prompt: str, verified_data: Optional[
         guidance_block = f"Follow this structure — one JSON section per numbered item:\n{_comparison_instructions()}\n\n"
     else:
         guidance_block = ""
+    # A single task produces exactly ONE file (contract §2.4's TaskResult
+    # has one file_url/file_name, not a list) — but a prompt like "...in
+    # word doc then make an excel report of..." names TWO different
+    # deliverables in one message. Without this, Qwen was asked to make
+    # the JSON "fully represent" the WHOLE prompt and dutifully crammed
+    # both unrelated deliverables' content into the one file being made
+    # (observed live: an .xlsx whose cells held an Italy-summer essay
+    # paragraph AND a Fibonacci list, in the same document, because
+    # _detect_file_type had already committed to producing only an
+    # .xlsx). Scoping this stage to only the chosen format's own topic
+    # — and telling it to leave the rest out rather than merge it in —
+    # fixes the mixed-content symptom even though true multi-file output
+    # in one task is a bigger contract change, not done here.
+    multi_types = _detect_requested_file_types(original_prompt)
+    if len(multi_types) > 1:
+        chosen = multi_types[0]
+        others = ", ".join(t.upper() for t in multi_types[1:])
+        scope_block = (
+            f"IMPORTANT: this single request actually names MULTIPLE separate deliverables "
+            f"(you are generating only the {chosen.upper()} one right now). Include content for "
+            f"ONLY the part of the request that belongs in this {chosen.upper()} file. Completely "
+            f"leave out any content that belongs to the other requested deliverable(s) "
+            f"({others}) — do not summarize, mention, or merge it in. It will be generated "
+            f"separately if the user asks for it again.\n\n"
+        )
+    else:
+        scope_block = ""
     return (
         "You are preparing structured content for a generated file.\n"
         f"User request: \"{original_prompt}\"\n\n"
+        f"{scope_block}"
         f"{guidance_block}"
         f"{data_block}"
         "Respond with ONLY valid JSON (no markdown fences, no commentary) matching "
