@@ -286,21 +286,6 @@ input, select { font-family: inherit; }
   background: var(--cta-bg); color: var(--cta-text); border-radius: 8px;
 }
 .composer-send:disabled { opacity: 0.4; cursor: not-allowed; }
-/* Selected-but-not-yet-sent attachment — sits ABOVE the composer input
-   (not below it) and is deliberately boxed/prominent: this is the file
-   that's about to be sent, worth noticing before you hit send. */
-.file-preview {
-  display: none; align-items: center; gap: 10px; font-size: 13px; color: var(--text-primary);
-  background: var(--elevated-surface); border: 1.5px solid var(--accent);
-  border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
-  box-shadow: 0 4px 16px var(--shadow-lg);
-  animation: file-preview-in .18s ease;
-}
-.file-preview.show { display: flex; }
-.file-preview > iconify-icon { font-size: 18px; color: var(--accent); flex-shrink: 0; }
-.file-preview .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.file-preview button { color: var(--text-muted); background: none; border: none; font-size: 16px; flex-shrink: 0; padding: 2px; border-radius: 6px; }
-.file-preview button:hover { color: var(--error); background: rgba(226,104,95,0.1); }
 @keyframes file-preview-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 #file-input, #kb-file-input { display: none; }
 
@@ -739,6 +724,115 @@ tbody td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 .admin-login-back { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 18px; }
 .admin-login-back:hover { color: var(--text-secondary); }
 
+/* ---- User sign-in / sign-up (same visual system as admin-login) ---- */
+.auth-shell {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center; position: relative;
+  background: var(--canvas-bg); overflow: hidden; padding: 24px;
+}
+.auth-card {
+  position: relative; z-index: 5; width: 400px; max-width: 100%; background: var(--elevated-surface);
+  border: 1px solid var(--border-bold); border-radius: 14px; padding: 34px; box-shadow: 0 8px 32px var(--shadow-lg);
+}
+.auth-mark {
+  width: 42px; height: 42px; border-radius: 11px; background: var(--accent); display: flex; align-items: center;
+  justify-content: center; color: var(--canvas-bg); font-size: 21px; margin-bottom: 18px;
+}
+.auth-card h1 { font-size: 19px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; }
+.auth-card p.auth-sub { font-size: 12.5px; color: var(--text-muted); margin: 0 0 24px; line-height: 1.5; }
+.auth-field { margin-bottom: 15px; }
+.auth-field label { display: block; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+.auth-field-hint { font-size: 11px; color: var(--text-muted); margin: 6px 2px 0; line-height: 1.4; }
+.auth-field .auth-input-wrap { position: relative; display: flex; align-items: center; }
+.auth-field input {
+  width: 100%; background: var(--base-surface); border: 1px solid var(--border-subtle); border-radius: 8px;
+  padding: 10px 12px; font-size: 14px; color: var(--text-primary); outline: none;
+}
+.auth-field input:focus { border-color: var(--accent); }
+.auth-field .auth-toggle-visibility {
+  position: absolute; right: 6px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); background: none; border: none; border-radius: 6px; font-size: 15px;
+}
+.auth-field .auth-toggle-visibility:hover { color: var(--text-primary); background: var(--hover-surface); }
+.auth-field input[type="password"], .auth-field input[data-pw-field] { padding-right: 38px; }
+.auth-submit {
+  width: 100%; padding: 11px; border-radius: 8px; border: none; background: var(--cta-bg); color: var(--cta-text);
+  font-size: 13.5px; font-weight: 600; margin-top: 6px; letter-spacing: 0.01em;
+}
+.auth-submit:hover { opacity: 0.9; }
+.auth-error { font-size: 12px; color: var(--error); margin: 10px 0 0; display: none; }
+.auth-error.show { display: block; }
+.auth-switch {
+  margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border-subtle);
+  font-size: 12.5px; color: var(--text-muted); text-align: center;
+}
+.auth-switch a { color: var(--accent); font-weight: 500; }
+.auth-switch a:hover { text-decoration: underline; }
+.auth-note {
+  margin-top: 16px; font-size: 10.5px; color: var(--text-muted); line-height: 1.5; text-align: center;
+}
+
+/* ---- Composer multi-file preview list ---- */
+.file-preview-list { display: none; flex-direction: column; gap: 6px; padding: 4px; margin-bottom: 4px; }
+.file-preview-list.show { display: flex; }
+.file-chip-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+  background: var(--base-surface); border: 1px solid var(--border-subtle);
+  animation: file-preview-in .18s ease;
+}
+.file-chip-row > iconify-icon { font-size: 16px; color: var(--accent); flex-shrink: 0; }
+.file-chip-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: 12.5px; }
+.file-chip-row .size { flex-shrink: 0; font-size: 10.5px; color: var(--text-muted); }
+.file-chip-row .remove-file-btn {
+  color: var(--text-muted); background: none; border: none; font-size: 15px; flex-shrink: 0; padding: 3px;
+  border-radius: 6px; display: flex;
+}
+.file-chip-row .remove-file-btn:hover { color: var(--error); background: rgba(226,104,95,0.1); }
+.file-chip-row.file-chip-primary { border-color: var(--accent); }
+.file-preview-count {
+  font-size: 10.5px; color: var(--text-muted); padding: 0 4px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+
+/* ---- Voice input (speech-to-text) overlay ---- */
+.mic-overlay {
+  position: fixed; inset: 0; z-index: 250; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; visibility: hidden; transition: opacity .2s ease;
+}
+.mic-overlay:not([hidden]) { opacity: 1; visibility: visible; }
+.mic-overlay-card {
+  width: 360px; max-width: 90vw; background: var(--elevated-surface); border: 1px solid var(--border-bold);
+  border-radius: 16px; padding: 36px 28px; text-align: center; box-shadow: 0 24px 64px var(--shadow-lg);
+  position: relative;
+}
+.mic-overlay-close {
+  position: absolute; top: 12px; right: 12px; width: 30px; height: 30px; display: flex; align-items: center;
+  justify-content: center; color: var(--text-muted); background: none; border: none; border-radius: 8px; font-size: 16px;
+}
+.mic-overlay-close:hover { color: var(--text-primary); background: var(--hover-surface); }
+.mic-big-icon {
+  width: 92px; height: 92px; border-radius: 999px; margin: 0 auto 20px; display: flex; align-items: center;
+  justify-content: center; font-size: 40px; color: var(--accent); background: var(--accent-wash);
+  border: 2px solid var(--accent); position: relative; transition: all .2s ease;
+}
+.mic-overlay.listening .mic-big-icon { color: var(--cta-bg); background: var(--accent); }
+.mic-big-icon::before, .mic-big-icon::after {
+  content: ''; position: absolute; inset: 0; border-radius: 999px; border: 2px solid var(--accent);
+  opacity: 0; pointer-events: none;
+}
+.mic-overlay.listening .mic-big-icon::before { animation: mic-pulse 1.8s ease-out infinite; }
+.mic-overlay.listening .mic-big-icon::after { animation: mic-pulse 1.8s ease-out infinite .5s; }
+@keyframes mic-pulse {
+  0% { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+.mic-status { font-size: 14px; font-weight: 500; color: var(--text-primary); margin-bottom: 8px; }
+.mic-transcript {
+  min-height: 42px; font-size: 13px; color: var(--text-secondary); line-height: 1.5;
+  padding: 10px 12px; background: var(--base-surface); border: 1px solid var(--border-subtle); border-radius: 8px;
+}
+.mic-transcript:empty::before { content: 'Say something…'; color: var(--text-muted); }
+.mic-hint { font-size: 11px; color: var(--text-muted); margin-top: 14px; }
+
 /* ============================================================
    Rich AI result formatting — intro / body / conclusion with
    real spacing, headings, lists, and a compact code box.
@@ -1064,6 +1158,8 @@ tbody td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
   .arch-node { min-width: 160px; }
 
   .admin-login-card { padding: 24px 20px; }
+  .auth-card { padding: 26px 20px; }
+  .mic-overlay-card { padding: 28px 20px; }
 
   .demo-badge { left: 14px; right: 14px; justify-content: center; }
   .toast { left: 14px; right: 14px; transform: translateY(-12px); max-width: none; }

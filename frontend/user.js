@@ -546,7 +546,17 @@ function runDemoSimulation(task) {
    Composer (two instances: centered-idle and docked-active,
    sharing one submit pipeline)
    ============================================================ */
-let pendingFile = null;
+// One outstanding attachment queue, shared by both composer instances (idle
+// centered / docked active) — a File[] rather than a single File so several
+// files picked or dropped at once (multi-select in the OS file dialog, or a
+// multi-file drag) all show up cleanly before sending, not just the last one.
+let pendingFiles = [];
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function initComposer() {
   const fileInput = document.getElementById('file-input');
@@ -559,25 +569,47 @@ function initComposer() {
   const dockedAttach = document.getElementById('composer-attach');
   const dockedPreview = document.getElementById('file-preview');
 
+  function addPendingFiles(fileList) {
+    const incoming = Array.from(fileList || []);
+    // De-dupe by name+size — picking/dropping the same file twice (a common
+    // slip with drag-and-drop) shouldn't queue it twice.
+    incoming.forEach((f) => {
+      if (!pendingFiles.some((p) => p.name === f.name && p.size === f.size)) pendingFiles.push(f);
+    });
+    syncFilePreview();
+  }
+
+  function removePendingFile(index) {
+    pendingFiles.splice(index, 1);
+    syncFilePreview();
+  }
+
   function syncFilePreview() {
     [idlePreview, dockedPreview].forEach((el) => {
-      if (!pendingFile) { el.classList.remove('show'); return; }
-      el.querySelector('.name').textContent = pendingFile.name;
+      if (!pendingFiles.length) { el.classList.remove('show'); el.innerHTML = ''; return; }
       el.classList.add('show');
+      el.innerHTML =
+        (pendingFiles.length > 1 ? `<div class="file-preview-count">${pendingFiles.length} files attached</div>` : '') +
+        pendingFiles.map((f, i) => `
+          <div class="file-chip-row${fileKind(f) === 'image' && i === 0 ? ' file-chip-primary' : ''}">
+            <iconify-icon icon="${fileTypeIcon(f.name)}"></iconify-icon>
+            <span class="name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+            <span class="size">${formatFileSize(f.size)}</span>
+            <button type="button" class="remove-file-btn" data-remove-file="${i}" title="Remove"><iconify-icon icon="lucide:x"></iconify-icon></button>
+          </div>`).join('');
+      el.querySelectorAll('[data-remove-file]').forEach((btn) => {
+        btn.addEventListener('click', () => removePendingFile(Number(btn.dataset.removeFile)));
+      });
     });
   }
-  [idlePreview, dockedPreview].forEach((el) => {
-    el.querySelector('button').addEventListener('click', () => {
-      pendingFile = null; fileInput.value = ''; syncFilePreview();
-    });
-  });
   [idleAttach, dockedAttach].forEach((btn) => btn.addEventListener('click', () => fileInput.click()));
   fileInput.addEventListener('change', () => {
-    pendingFile = fileInput.files[0] || null;
-    syncFilePreview();
+    addPendingFiles(fileInput.files);
+    fileInput.value = '';
   });
 
-  // Drag-and-drop attach anywhere over the main pane.
+  // Drag-and-drop attach anywhere over the main pane — accepts multiple
+  // files dropped at once, same as the file picker.
   const mainView = document.getElementById('main-view');
   let dragDepth = 0;
   const hasFiles = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
@@ -598,9 +630,7 @@ function initComposer() {
     if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
     e.preventDefault();
     dragDepth = 0; mainView.classList.remove('drag-over');
-    pendingFile = e.dataTransfer.files[0];
-    fileInput.value = '';
-    syncFilePreview();
+    addPendingFiles(e.dataTransfer.files);
     (chatMessages.length ? dockedInput : idleInput).focus();
   });
 
@@ -707,26 +737,39 @@ function initComposer() {
 
   async function submit(fromInput) {
     const prompt = fromInput.value.trim();
-    const file = pendingFile;
-    if (!prompt && !file) return;
+    const files = pendingFiles.slice();
+    if (!prompt && !files.length) return;
 
     setSendEnabled(false);
     idleInput.value = ''; dockedInput.value = '';
     fileInput.value = '';
-    pendingFile = null;
+    pendingFiles = [];
     syncFilePreview();
 
+    // The backend contract sends ONE optional file per message (an image
+    // for the vision model). Several documents can still be queued
+    // together, though — those go to the Knowledge Base one at a time
+    // (handleUpload already supports that), not into the message itself.
+    // Only the FIRST image in the queue can ride along on this message;
+    // say so plainly instead of silently dropping the rest.
+    const images = files.filter((f) => fileKind(f) === 'image');
+    const docs = files.filter((f) => fileKind(f) !== 'image');
+    const primaryImage = images[0] || null;
+    if (images.length > 1) {
+      toast(`Only the first image (${images[0].name}) is attached to this message — the vision model takes one image per message. The rest were not sent.`, true);
+    }
+
     try {
-      if (file && fileKind(file) === 'image') {
-        const file_base64 = await fileToBase64(file);
+      for (const doc of docs) await handleUpload(doc);
+      if (primaryImage) {
+        const file_base64 = await fileToBase64(primaryImage);
         await handleMessage(prompt || 'Describe this image.', {
           file_base64,
-          file_mime_type: file.type || 'image/png',
-          file_name: file.name,
+          file_mime_type: primaryImage.type || 'image/png',
+          file_name: primaryImage.name,
         });
-      } else {
-        if (file) await handleUpload(file);
-        if (prompt) await handleMessage(prompt);
+      } else if (prompt) {
+        await handleMessage(prompt);
       }
     } catch (err) {
       toast(`Something went wrong: ${err.message}`, true);
@@ -1316,6 +1359,93 @@ function initNotifications() {
     if (!pop.hidden && !pop.contains(e.target) && e.target !== bell) pop.hidden = true;
   });
 }
+
+/* ============================================================
+   Voice input — speech-to-text via the browser's own Web Speech API
+   (window.SpeechRecognition / webkitSpeechRecognition). Fully local to
+   the browser, no network call — consistent with the air-gapped story,
+   same reasoning as the existing text-to-speech "Listen" feature. Opens
+   a large, clear microphone overlay; the finalized transcript is dropped
+   straight into whichever composer input opened it. Degrades invisibly
+   (mic buttons hidden entirely) on a browser without support.
+   ============================================================ */
+const VoiceInput = {
+  recognition: null,
+  targetInput: null,
+
+  supported() {
+    return 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+  },
+
+  init() {
+    const micIdle = document.getElementById('composer-mic-idle');
+    const micDocked = document.getElementById('composer-mic-docked');
+    const overlay = document.getElementById('mic-overlay');
+    const closeBtn = document.getElementById('mic-close');
+    const statusEl = document.getElementById('mic-status');
+    const transcriptEl = document.getElementById('mic-transcript');
+    if (!overlay) return;
+
+    if (!this.supported()) {
+      // No speech API on this browser — hide the mic buttons entirely
+      // rather than showing a control that can only ever fail.
+      [micIdle, micDocked].forEach((b) => { if (b) b.hidden = true; });
+      return;
+    }
+
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    this.recognition = new SpeechRecognitionCtor();
+    this.recognition.continuous = false;
+    this.recognition.interimResults = true;
+    this.recognition.lang = 'en-US';
+
+    const open = (input) => {
+      this.targetInput = input;
+      overlay.hidden = false;
+      overlay.classList.add('listening');
+      statusEl.textContent = 'Listening…';
+      transcriptEl.textContent = '';
+      try { this.recognition.start(); } catch { /* already running — ignore */ }
+    };
+    const close = () => {
+      overlay.classList.remove('listening');
+      overlay.hidden = true;
+      try { this.recognition.stop(); } catch { /* noop */ }
+    };
+
+    this.recognition.onresult = (e) => {
+      let finalText = '', interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const chunk = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += chunk; else interim += chunk;
+      }
+      transcriptEl.textContent = (finalText + interim).trim();
+      if (finalText.trim()) {
+        const input = this.targetInput;
+        if (input) {
+          input.value = (input.value ? input.value.trim() + ' ' : '') + finalText.trim();
+          input.focus();
+        }
+        close();
+      }
+    };
+    this.recognition.onerror = (e) => {
+      overlay.classList.remove('listening');
+      statusEl.textContent = e.error === 'not-allowed'
+        ? 'Microphone access was blocked — allow it in your browser settings.'
+        : "Didn't catch that — try again.";
+    };
+    this.recognition.onend = () => {
+      overlay.classList.remove('listening');
+    };
+
+    if (micIdle) micIdle.addEventListener('click', () => open(document.getElementById('composer-input-idle')));
+    if (micDocked) micDocked.addEventListener('click', () => open(document.getElementById('composer-input')));
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !overlay.hidden) close(); });
+  },
+};
 
 /* ============================================================
    Gradient color picker — recolors ONLY the atmospheric wash,
@@ -2044,6 +2174,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   TemplateLibrary.init();
   PreviewPanel.init();
   KnowledgeBase.init();
+  VoiceInput.init();
+
+  const greetEl = document.getElementById('idle-greet');
+  if (greetEl) greetEl.textContent = Greetings.pick(UserAuth.nicknameFor(Store.USER_ID));
 
   document.getElementById('maximize-activity').addEventListener('click', (e) => { e.preventDefault(); openGraph(); });
   document.getElementById('graph-close').addEventListener('click', closeGraph);

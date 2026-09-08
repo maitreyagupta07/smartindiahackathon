@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign AI Workbench</title>
-<link rel="stylesheet" href="styles.css?v=20260916">
+<link rel="stylesheet" href="styles.css?v=20260917">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -64,8 +64,11 @@
       </div>
       <div class="sidebar-user">
         <div class="avatar"><iconify-icon icon="lucide:user"></iconify-icon></div>
-        <div class="who"><div class="n">Operator</div><div class="id mono" id="sidebar-user-id"></div></div>
+        <div class="who"><div class="n" id="sidebar-user-name">Operator</div><div class="id mono" id="sidebar-user-id"></div></div>
       </div>
+      <a href="#" id="logout-link" class="admin-switch-link">
+        <iconify-icon icon="lucide:log-out"></iconify-icon><span>Sign out</span>
+      </a>
       <a href="admin-login.html" class="admin-switch-link">
         <iconify-icon icon="lucide:shield"></iconify-icon><span>Switch to Admin</span>
       </a>
@@ -105,15 +108,13 @@
     <!-- Idle / empty state: composer centered as the primary focal point -->
     <div id="idle-view" class="idle-view">
       <div class="idle-inner">
-        <div class="greet">Hi, Operator 👋</div>
+        <div class="greet" id="idle-greet">Hi, Operator 👋</div>
         <h1>What are we building today?</h1>
         <div class="template-bar" id="template-bar-idle" aria-label="Task templates"></div>
-        <div class="file-preview" id="file-preview-idle">
-          <iconify-icon icon="lucide:paperclip"></iconify-icon><span class="name"></span>
-          <button title="Remove"><iconify-icon icon="lucide:x"></iconify-icon></button>
-        </div>
+        <div class="file-preview-list" id="file-preview-idle"></div>
         <div class="composer-bar composer-bar--centered">
-          <button class="composer-btn" id="composer-attach-idle" title="Attach a file (PDF, Word, PPT, Excel, text, or image)"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <button class="composer-btn" id="composer-attach-idle" title="Attach files (PDF, Word, PPT, Excel, text, or image)"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <button class="composer-btn" id="composer-mic-idle" title="Voice input"><iconify-icon icon="lucide:mic"></iconify-icon></button>
           <input id="composer-input-idle" type="text" placeholder="Ask a question, or attach a file...">
           <button class="composer-btn composer-send" id="composer-send-idle" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
         </div>
@@ -130,12 +131,10 @@
       <div class="composer-inner">
         <div class="template-bar template-bar--docked" id="template-bar-docked" aria-label="Task templates"></div>
         <div id="live-strip" class="live-strip"></div>
-        <div class="file-preview" id="file-preview">
-          <iconify-icon icon="lucide:paperclip"></iconify-icon><span class="name"></span>
-          <button title="Remove"><iconify-icon icon="lucide:x"></iconify-icon></button>
-        </div>
+        <div class="file-preview-list" id="file-preview"></div>
         <div class="composer-bar">
-          <button class="composer-btn" id="composer-attach" title="Attach a file (PDF, Word, PPT, Excel, text, or image)"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <button class="composer-btn" id="composer-attach" title="Attach files (PDF, Word, PPT, Excel, text, or image)"><iconify-icon icon="lucide:plus"></iconify-icon></button>
+          <button class="composer-btn" id="composer-mic-docked" title="Voice input"><iconify-icon icon="lucide:mic"></iconify-icon></button>
           <input id="composer-input" type="text" placeholder="Ask a follow-up, or attach a file...">
           <button class="composer-btn composer-send" id="composer-send" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
         </div>
@@ -143,9 +142,9 @@
       </div>
     </div>
 
-    <input type="file" id="file-input"
+    <input type="file" id="file-input" multiple
       accept="application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp">
-    <input type="file" id="kb-file-input"
+    <input type="file" id="kb-file-input" multiple
       accept="application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md">
     <div class="drop-hint" id="drop-hint" aria-hidden="true">
       <div class="drop-hint-inner">
@@ -227,12 +226,31 @@
     </header>
     <div class="preview-panel-body custom-scroll" id="preview-panel-body"></div>
   </aside>
+
+  <!-- Voice input (speech-to-text) overlay — opened by the mic button in
+       either composer instance. -->
+  <div class="mic-overlay" id="mic-overlay" hidden role="dialog" aria-label="Voice input">
+    <div class="mic-overlay-card">
+      <button class="mic-overlay-close" id="mic-close" title="Close"><iconify-icon icon="lucide:x"></iconify-icon></button>
+      <div class="mic-big-icon"><iconify-icon icon="lucide:mic"></iconify-icon></div>
+      <div class="mic-status" id="mic-status">Listening…</div>
+      <div class="mic-transcript" id="mic-transcript"></div>
+      <div class="mic-hint">Speak naturally — this fills the message box when you're done.</div>
+    </div>
+  </div>
 </div>
 
-<script src="app.js?v=20260916"></script>
-<script src="user.js?v=20260916"></script>
+<script src="app.js?v=20260917"></script>
+<script>UserAuth.guard(); // redirects to login.html immediately if no active user session</script>
+<script src="user.js?v=20260917"></script>
 <script>
   document.getElementById('sidebar-user-id').textContent = Store.USER_ID;
+  document.getElementById('sidebar-user-name').textContent = UserAuth.nicknameFor(Store.USER_ID);
+  document.getElementById('logout-link').addEventListener('click', (e) => {
+    e.preventDefault();
+    UserAuth.endSession();
+    location.href = 'login.html';
+  });
 </script>
 </body>
 </html>

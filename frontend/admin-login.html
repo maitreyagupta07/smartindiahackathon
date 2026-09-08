@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Admin Access — Sovereign AI</title>
-<link rel="stylesheet" href="styles.css?v=20260914">
+<link rel="stylesheet" href="styles.css?v=20260917">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -38,13 +38,14 @@
   </div>
 </div>
 
-<script src="app.js?v=20260914"></script>
+<script src="app.js?v=20260917"></script>
 <script>
   const form = document.getElementById('login-form');
   const input = document.getElementById('passcode-input');
   const confirmField = document.getElementById('confirm-field');
   const confirmInput = document.getElementById('passcode-confirm');
   const errorEl = document.getElementById('login-error');
+  AdminAuth.ensureDefaultPasscode(); // admin passcode defaults to 1230# out of the box
   const isFirstRun = !AdminAuth.hasPasscode();
 
   if (isFirstRun) {

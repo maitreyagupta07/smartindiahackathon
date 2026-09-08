@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sign In — Sovereign AI</title>
+<link rel="stylesheet" href="styles.css?v=20260917">
+<script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+</head>
+<body>
+<div class="auth-shell">
+  <div class="hero-gradient"></div>
+  <div class="auth-card">
+    <div class="auth-mark"><iconify-icon icon="lucide:shield-check"></iconify-icon></div>
+    <h1>Welcome back</h1>
+    <p class="auth-sub">Sign in to your Sovereign AI Workbench.</p>
+
+    <form id="login-form" autocomplete="on">
+      <div class="auth-field">
+        <label for="user-id-input">User ID</label>
+        <input id="user-id-input" type="text" autocomplete="username" placeholder="e.g. jsmith" autofocus>
+      </div>
+      <div class="auth-field">
+        <label for="password-input">Password</label>
+        <div class="auth-input-wrap">
+          <input id="password-input" type="password" data-pw-field autocomplete="current-password" placeholder="••••••••">
+          <button type="button" class="auth-toggle-visibility" data-toggle-for="password-input" title="Show password">
+            <iconify-icon icon="lucide:eye"></iconify-icon>
+          </button>
+        </div>
+      </div>
+      <button type="submit" class="auth-submit" id="login-submit">Sign in</button>
+      <p class="auth-error" id="login-error"></p>
+    </form>
+
+    <div class="auth-switch">New here? <a href="signup.html">Create an account</a></div>
+    <div class="auth-note">
+      A browser-local account on this device — there is no server-side login yet.
+      Your User ID becomes your identity across chats and your Knowledge Base.
+    </div>
+  </div>
+</div>
+
+<script src="app.js?v=20260917"></script>
+<script>
+  if (UserAuth.isSessionActive()) location.replace('index.html');
+
+  const form = document.getElementById('login-form');
+  const userIdInput = document.getElementById('user-id-input');
+  const passwordInput = document.getElementById('password-input');
+  const errorEl = document.getElementById('login-error');
+
+  document.querySelectorAll('.auth-toggle-visibility').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = document.getElementById(btn.dataset.toggleFor);
+      const showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      btn.querySelector('iconify-icon').setAttribute('icon', showing ? 'lucide:eye' : 'lucide:eye-off');
+    });
+  });
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.classList.add('show');
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    errorEl.classList.remove('show');
+    const userId = userIdInput.value.trim();
+    const password = passwordInput.value;
+    if (!userId || !password) { showError('Enter your User ID and password.'); return; }
+    if (!UserAuth.accountExists(userId)) { showError('No account with that User ID yet — create one below.'); return; }
+    if (!UserAuth.checkLogin(userId, password)) { showError('Incorrect password.'); return; }
+
+    UserAuth.startSession(userId);
+    const params = new URLSearchParams(location.search);
+    location.href = params.get('next') || 'index.html';
+  });
+</script>
+</body>
+</html>
