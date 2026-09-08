@@ -96,6 +96,13 @@ MAX_TOOL_ATTEMPTS = 2
 # retrying is a real recovery, not a guess.
 MAX_FILEGEN_CONTENT_RETRIES = 1
 
+# How many times the document-generation VERIFICATION-CODE stage is
+# re-generated when its sandbox run produced no usable result before the
+# task fails loudly. A computed value that was never verified in the
+# sandbox must never be written into a generated file — the planner raises
+# VerifiedComputationError instead of asking the model to supply it.
+MAX_FILEGEN_CODEGEN_RETRIES = 1
+
 # The approval-note LoRA adapter is a small, quantized model — at Ollama's
 # default sampling temperature it occasionally goes fully off-script (e.g.
 # a flat "I'm sorry, but I can't assist with that." on an entirely benign
@@ -174,6 +181,19 @@ class CodeGenerationError(Exception):
     Neither retrying execute_code with the same unusable text nor silently
     substituting the raw natural-language user prompt is an acceptable
     fallback, so surfacing this as a hard failure is the correct behavior.
+    """
+
+
+class VerifiedComputationError(Exception):
+    """
+    Raised when a document-generation request needs computed values but the
+    sandbox could not verify them (Docker/sandbox unavailable, the generated
+    verification program errored, or it produced no output) even after a
+    regeneration retry. Propagates to loop.py's outer handler -> a clean
+    status="failed" response. The alternative — letting the model fill in
+    the numbers itself and writing them into the file — is exactly the
+    hallucinated-value outcome this whole verify-in-sandbox flow exists to
+    prevent, so failing loudly is the correct behavior.
     """
 
 
@@ -850,6 +870,19 @@ def _build_code_result_prompt(original_prompt: str, tool_observation: dict) -> s
     stderr = tool_observation.get("stderr", "")
     exit_code = tool_observation.get("exit_code")
 
+    if exit_code == 127 or "sandbox unavailable" in (stderr or "").lower():
+        # The code was never actually run — the Docker sandbox isn't
+        # reachable on this host. Say so plainly; do NOT let the model
+        # produce a "here's the answer" as if the code had executed.
+        return (
+            f"The user asked to compute/run something: \"{original_prompt}\"\n\n"
+            "The code-execution sandbox is not available on this machine (the Docker "
+            "daemon is not running), so the code was NOT executed and no result was "
+            "verified. Tell the user exactly this — that the computation could not be "
+            "run and verified — and do NOT guess, estimate, or compute the answer "
+            "yourself. Suggest starting Docker and retrying."
+        )
+
     if exit_code != 0:
         # The sandbox run failed (e.g. a syntax error because the prompt had
         # no actual code for Person F to extract) — Qwen must report the
@@ -1059,6 +1092,35 @@ def _last_execute_code_stdout(state: TaskState) -> Optional[str]:
     return None
 
 
+def _filegen_codegen_step(state: TaskState, retry: bool = False) -> NextStep:
+    """
+    The document-generation VERIFICATION-CODE call: ask Qwen for a runnable
+    Python script that computes the deliverable's data and prints it as
+    JSON, to be executed in the sandbox. `retry=True` appends a firmer
+    instruction after a first attempt failed to run / produce output.
+    """
+    code_prompt = _build_filegen_code_prompt(state.prompt, state=state)
+    if retry:
+        code_prompt += (
+            "\n\nThe previous attempt did not run successfully or printed nothing. "
+            "Return ONLY a single self-contained Python script (no prose, no markdown "
+            "fences). It must not need any network access, must compute every value "
+            "the request asks for, and must end by printing the result as JSON with "
+            "print(json.dumps(result))."
+        )
+    print(
+        f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
+        f"-> call_qwen model={_filegen_model(state.prompt)} "
+        f"({'REGENERATE ' if retry else ''}verification code, computation detected)"
+    )
+    return NextStep(
+        action="call_qwen",
+        model=_filegen_model(state.prompt),
+        prompt=FILEGEN_CODE_MARKER + code_prompt,
+        temperature=FILEGEN_STRUCTURED_TEMPERATURE,
+    )
+
+
 def _filegen_entry_step(state: TaskState) -> NextStep:
     """
     Decides the first Qwen call for producing state.file_type — the SAME
@@ -1081,16 +1143,7 @@ def _filegen_entry_step(state: TaskState) -> NextStep:
     # content-prep stage and fell back to raw-prompt content.
     computation_scope_prompt, _ = _scoped_deliverable_prompt(state)
     if _needs_computation(computation_scope_prompt):
-        print(
-            f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
-            f"-> call_qwen model={filegen_model} (generate verification code, computation detected)"
-        )
-        return NextStep(
-            action="call_qwen",
-            model=filegen_model,
-            prompt=FILEGEN_CODE_MARKER + _build_filegen_code_prompt(state.prompt, state=state),
-            temperature=FILEGEN_STRUCTURED_TEMPERATURE,
-        )
+        return _filegen_codegen_step(state)
     if filegen_model == LORA_ADAPTER:
         # The adapter is trained to write approval notes directly in its
         # own free-text format, not Person C's generic FileContent JSON —
@@ -1224,7 +1277,10 @@ def decide_next_step(state: TaskState) -> NextStep:
             # it, silently dropping the last deliverable (observed live:
             # steps showed a successful 2nd generate_file call, but
             # state.generated_files only ever had 1 entry).
-            state.max_steps = max(state.max_steps, (4 + MAX_FILEGEN_CONTENT_RETRIES) * len(state.file_types) + 2)
+            state.max_steps = max(
+                state.max_steps,
+                (4 + MAX_FILEGEN_CONTENT_RETRIES + MAX_FILEGEN_CODEGEN_RETRIES) * len(state.file_types) + 2,
+            )
             return _filegen_entry_step(state)
 
         # text-generation (default).
@@ -1382,8 +1438,47 @@ def decide_next_step(state: TaskState) -> NextStep:
     if last.action == "call_tool":
         if last.tool_name == "execute_code":
             if state.task_type == "document-generation":
-                stdout = (last.observation or {}).get("stdout", "")
+                _obs = last.observation or {}
+                stdout = _obs.get("stdout") or ""
+                stderr = _obs.get("stderr") or ""
+                exit_code = _obs.get("exit_code", 0)
                 filegen_model = _filegen_model(state.prompt)
+
+                # HARD RULE: the verification code must have actually run and
+                # produced output. If it didn't (sandbox unavailable,
+                # non-zero exit, or empty stdout), regenerate the code once —
+                # and if it STILL can't be verified, fail the whole task
+                # rather than fall through to a content stage that would let
+                # the model invent the numbers. An unverified computed value
+                # must never reach a generated file.
+                if exit_code != 0 or not stdout.strip():
+                    if state.filegen_codegen_retries < MAX_FILEGEN_CODEGEN_RETRIES:
+                        state.filegen_codegen_retries += 1
+                        print(
+                            f"[PLANNER] task_id={state.task_id} filegen verification run did not "
+                            f"produce a usable result (exit={exit_code}, stdout_empty={not stdout.strip()}) "
+                            f"-> regenerating verification code "
+                            f"({state.filegen_codegen_retries}/{MAX_FILEGEN_CODEGEN_RETRIES})"
+                        )
+                        return _filegen_codegen_step(state, retry=True)
+                    sandbox_down = exit_code == 127 or "sandbox unavailable" in stderr.lower()
+                    reason = (
+                        "the code-execution sandbox is not available (is Docker running?)"
+                        if sandbox_down
+                        else f"the verification program failed (exit code {exit_code})"
+                        + (f": {stderr.strip()[:300]}" if stderr.strip() else "")
+                    )
+                    print(
+                        f"[PLANNER] task_id={state.task_id} filegen computation UNVERIFIABLE "
+                        f"-> failing the task (never writing unverified numbers to a file)"
+                    )
+                    raise VerifiedComputationError(
+                        "This request needs computed values, but they could not be verified "
+                        f"because {reason}. The file was not generated — computed numbers are only "
+                        "ever written after being checked in the sandbox, never taken from the "
+                        "model directly. Start the sandbox (Docker) and try again, or include the "
+                        "values in your message."
+                    )
 
                 # Skip the LLM content-prep call entirely when the verified
                 # stdout already IS clean, structured data — building the
@@ -1479,6 +1574,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                 state.file_type = state.file_types[state.file_index]
                 state.prepared_file_content = None
                 state.filegen_content_retries = 0
+                state.filegen_codegen_retries = 0
                 print(
                     f"[PLANNER] task_id={state.task_id} -> starting next deliverable "
                     f"[{state.file_index + 1}/{len(state.file_types)}]={state.file_type}"

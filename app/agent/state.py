@@ -94,6 +94,14 @@ class TaskState:
     # one gets its own retry budget.
     filegen_content_retries: int = 0
 
+    # How many times the document-generation VERIFICATION-CODE stage has been
+    # re-generated for the CURRENT deliverable after the sandbox run failed
+    # to produce a usable result (sandbox unavailable, non-zero exit, or
+    # empty stdout). Once this budget is spent the task fails loudly rather
+    # than letting the model fill in the numbers itself — an unverified
+    # computed value must never reach a generated file. Reset per deliverable.
+    filegen_codegen_retries: int = 0
+
     def add_step(
         self,
         action: str,

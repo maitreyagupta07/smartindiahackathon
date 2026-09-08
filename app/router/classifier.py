@@ -232,6 +232,41 @@ MULTI_STEP_CONNECTORS = (
 _ARITHMETIC_EXPRESSION_RE = re.compile(r"\d+\s*[\+\-\*/^]\s*\d+")
 _CODE_FENCE_RE = re.compile(r"```")
 
+# A request to PRODUCE numeric data / a computed sequence — the kind of
+# thing a small language model routinely gets subtly wrong if it answers
+# from its own head ("the first 20 Fibonacci numbers", "the 15th prime",
+# "the sum of 1..100", "a multiplication table for 7"). Matching this
+# routes the request through the code-execution flow instead: the agent
+# writes a Python script, runs it in the sandbox, and answers ONLY from
+# that verified output — no chance of a hallucinated value.
+#
+# Deliberately narrow and specific: it matches explicit, deterministically
+# computable asks, NOT vague domain wording like "calculate the corrosion
+# rate" (which has no sandbox-computable definition and must stay a plain
+# text answer — see test_calculate_with_domain_wording_stays_text_generation).
+_NUMERIC_TASK_RE = re.compile(
+    r"""(?ix)
+    \b(
+        fibonacci
+      | factorials?
+      | primes\b | prime \s+ numbers?
+      | perfect \s+ numbers?
+      | triangular \s+ numbers?
+      | (?: multiplication | times ) \s+ table
+      | (?: first | last | next | top ) \s+ \d+ \s+ (?:\w+ \s+){0,3}
+          (?: numbers? | terms? | values? | digits? | primes? | rows? | entries | elements? | integers? | multiples? )
+      | \d+ (?: st | nd | rd | th ) \s+ (?:\w+ \s+){0,2}
+          (?: number | term | prime | fibonacci | digit | row | value )
+      | (?: sum | product | average | mean | median | mode | variance |
+            standard \s+ deviation | std \s* dev(?:iation)? ) \s+ of \s
+      | (?: gcd | lcm | hcf ) \s+ of \s
+      | (?: factors | divisors | multiples ) \s+ of \s+ \d
+      | (?: square | cube ) \s+ roots? \s+ of \s+ \d
+      | sequence \s+ of \s+ \d
+    )
+    """,
+)
+
 # A document/record identifier from the local corpus: SOP-PTW-01, MAN-INSP-02,
 # POL-HR-04, HR-DIR-01, ENG-AR-05, AN-2024-0417, EMP-1042, IT-CAT-2026, ...
 _RECORD_ID_RE = re.compile(
@@ -330,6 +365,16 @@ def classify(prompt: str, file_mime_type: Optional[str]) -> ClassificationResult
     if _CODE_FENCE_RE.search(prompt):
         scores["code-execution"] += 5
         matches_by_type["code-execution"].append(("<code fence>", 5, "numeric_evidence", 0))
+
+    # An explicit "produce this computed number / sequence" ask routes to
+    # code-execution so the value is computed + sandbox-verified rather than
+    # answered from the model's head — UNLESS a file format was also named,
+    # in which case document-generation stays primary and its own flow runs
+    # the same verify-in-sandbox step before writing the file (see
+    # app/agent/planner.py's _needs_computation / _filegen_codegen_step).
+    if _NUMERIC_TASK_RE.search(prompt) and scores["document-generation"] < MIN_CONFIDENT_SCORE:
+        scores["code-execution"] += 4
+        matches_by_type["code-execution"].append(("<computed-number request>", 4, "numeric_evidence", 0))
 
     # A corpus document/record ID in the prompt ("what does SOP-PTW-01 say
     # about fire watch", "employee EMP-1042") is strong evidence of a
