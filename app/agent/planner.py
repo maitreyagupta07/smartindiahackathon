@@ -88,6 +88,14 @@ ToolName = Literal["execute_code", "search_docs", "generate_file", "scan_documen
 # and tighter than, state.max_steps — this bounds retries specifically.
 MAX_TOOL_ATTEMPTS = 2
 
+# How many times the filegen content-prep stage gets re-sampled after
+# producing unparseable JSON before giving up and falling back to the
+# generic raw-prompt content. This size of local model's strict-JSON output
+# fails on a genuinely per-call basis (verified live: the identical prompt
+# produced valid JSON on one attempt and malformed JSON on another) —
+# retrying is a real recovery, not a guess.
+MAX_FILEGEN_CONTENT_RETRIES = 1
+
 # The approval-note LoRA adapter is a small, quantized model — at Ollama's
 # default sampling temperature it occasionally goes fully off-script (e.g.
 # a flat "I'm sorry, but I can't assist with that." on an entirely benign
@@ -501,9 +509,11 @@ def _build_filegen_content_prompt(
         '{"title": "<short title>", "sections": [{"heading": "<heading>", "body": "<body text>"}]}\n\n'
         "The content must fully represent what the user actually requested — include "
         "EVERY requested item/entry (not a summary and not the request text itself). "
-        "Use multiple sections where that helps (e.g. one section for the data, another "
-        "for a requested summary/average). A section's \"body\" may use newlines to lay "
-        "out lists/tables as plain text."
+        "Use multiple sections only to separate genuinely different topics (e.g. one "
+        "section for the data, another for a requested summary/average) — NEVER create "
+        "one section per individual item in a single list (e.g. do not make a separate "
+        "section for each number if asked for a list of numbers). A section's \"body\" "
+        "may use newlines to lay out an entire list/table as plain text, one item per line."
     )
 
 
@@ -993,6 +1003,20 @@ def _tool_attempt_count(state: TaskState, tool_name: str) -> int:
     )
 
 
+def _last_execute_code_stdout(state: TaskState) -> Optional[str]:
+    """
+    The most recent successful execute_code observation's stdout, if any —
+    used to re-ground a content-prep RETRY in the same verified data the
+    original (failed-to-parse) attempt had, instead of silently losing that
+    grounding just because this attempt didn't need to re-run the
+    computation itself.
+    """
+    for r in reversed(state.step_records):
+        if r.action == "call_tool" and r.tool_name == "execute_code" and r.status == "ok":
+            return (r.observation or {}).get("stdout")
+    return None
+
+
 def _filegen_entry_step(state: TaskState) -> NextStep:
     """
     Decides the first Qwen call for producing state.file_type — the SAME
@@ -1137,20 +1161,21 @@ def decide_next_step(state: TaskState) -> NextStep:
             state.file_types = _detect_requested_file_types(state.prompt) or ["docx"]
             state.file_index = 0
             state.file_type = state.file_types[0]
-            # Each deliverable can take up to 4 steps on its own (codegen ->
-            # execute_code -> content-prep -> generate_file, when the request
-            # needs verified computation) — the single-deliverable default
-            # (MAX_STEPS_DEFAULT) doesn't leave enough room for a second (or
-            # third) deliverable's full chain in the same task. The +2 slack
-            # (matching the default's own cushion over its single-deliverable
-            # worst case of 4) is NOT optional headroom — hit_max_steps() is
-            # checked BEFORE a step's own result is processed, so with zero
-            # slack the final generate_file's own success is never actually
-            # observed: the loop force-finalizes right on top of it instead
-            # of recording it, silently dropping the last deliverable
-            # (observed live: steps showed a successful 2nd generate_file
-            # call, but state.generated_files only ever had 1 entry).
-            state.max_steps = max(state.max_steps, 4 * len(state.file_types) + 2)
+            # Each deliverable can take up to 5 steps on its own (codegen ->
+            # execute_code -> content-prep -> one content-prep RETRY on
+            # invalid JSON (MAX_FILEGEN_CONTENT_RETRIES) -> generate_file)
+            # — the single-deliverable default (MAX_STEPS_DEFAULT) doesn't
+            # leave enough room for a second (or third) deliverable's full
+            # chain in the same task. The +2 slack (matching the default's
+            # own cushion over its single-deliverable worst case) is NOT
+            # optional headroom — hit_max_steps() is checked BEFORE a
+            # step's own result is processed, so with zero slack the final
+            # generate_file's own success is never actually observed: the
+            # loop force-finalizes right on top of it instead of recording
+            # it, silently dropping the last deliverable (observed live:
+            # steps showed a successful 2nd generate_file call, but
+            # state.generated_files only ever had 1 entry).
+            state.max_steps = max(state.max_steps, (4 + MAX_FILEGEN_CONTENT_RETRIES) * len(state.file_types) + 2)
             return _filegen_entry_step(state)
 
         # text-generation (default).
@@ -1268,9 +1293,23 @@ def decide_next_step(state: TaskState) -> NextStep:
             else:
                 content = _parse_structured_content(str(last.observation))
                 if not _is_valid_file_content(content):
+                    if state.filegen_content_retries < MAX_FILEGEN_CONTENT_RETRIES:
+                        state.filegen_content_retries += 1
+                        print(
+                            f"[PLANNER] task_id={state.task_id} filegen content-prep returned invalid JSON "
+                            f"-> retrying ({state.filegen_content_retries}/{MAX_FILEGEN_CONTENT_RETRIES})"
+                        )
+                        return NextStep(
+                            action="call_qwen",
+                            model=_filegen_model(state.prompt),
+                            prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
+                                state.prompt, _last_execute_code_stdout(state), state=state
+                            ),
+                            temperature=FILEGEN_STRUCTURED_TEMPERATURE,
+                        )
                     print(
                         f"[PLANNER] task_id={state.task_id} filegen content-prep returned invalid JSON "
-                        f"-> falling back to raw-prompt content"
+                        f"after {state.filegen_content_retries} retry(ies) -> falling back to raw-prompt content"
                     )
                     content = _build_generate_file_args(state.prompt, state=state)["content"]
             state.prepared_file_content = content
@@ -1363,6 +1402,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                 # exactly like the first deliverable did at step 0.
                 state.file_type = state.file_types[state.file_index]
                 state.prepared_file_content = None
+                state.filegen_content_retries = 0
                 print(
                     f"[PLANNER] task_id={state.task_id} -> starting next deliverable "
                     f"[{state.file_index + 1}/{len(state.file_types)}]={state.file_type}"

@@ -80,6 +80,16 @@ class TaskState:
     file_index: int = 0
     generated_files: list[dict] = field(default_factory=list)
 
+    # How many times the content-prep JSON stage has been retried for the
+    # CURRENT deliverable (state.file_index) after producing unparseable
+    # JSON. This size of local model's JSON output fails on a genuinely
+    # per-call, probabilistic basis — the same prompt often succeeds on a
+    # fresh sampling attempt — so one retry recovers real content instead
+    # of immediately settling for the generic raw-prompt fallback. Reset
+    # to 0 whenever the planner moves on to the next deliverable, so each
+    # one gets its own retry budget.
+    filegen_content_retries: int = 0
+
     def add_step(
         self,
         action: str,
