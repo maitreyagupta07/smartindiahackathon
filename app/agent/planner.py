@@ -77,7 +77,7 @@ from ..router.classifier import FILE_FORMAT_KEYWORDS
 from ..tools.pdf_extract import extract_text_from_pdf, is_pdf
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
-ToolName = Literal["execute_code", "search_docs", "generate_file"]
+ToolName = Literal["execute_code", "search_docs", "generate_file", "scan_document"]
 
 # A tool call is allowed at most this many total attempts (initial + retries)
 # before the planner gives up and finalizes with an error. Independent of,
@@ -121,6 +121,26 @@ _COMPUTE_KEYWORDS = (
     "total", "fibonacci", "prime", "factorial", "sequence", "statistics",
     "count", "sort", "series", "numeric", "numbers",
 )
+
+# Signal for "the image is a document to be TRANSCRIBED, not a scene to be
+# DESCRIBED" — a request an uploaded image can still satisfy, but via OCR
+# (app/tools/ocr.py) rather than Moondream. Deliberately kept separate from
+# vision classification proper (an image mime type always sets task_type
+# ="vision" — see classifier.py's docstring on that being non-negotiable);
+# this only decides which of the TWO vision-capable paths handles the step0
+# entry point once task_type is already "vision".
+_DOCUMENT_SCAN_KEYWORDS = (
+    "transcribe", "transcription", "handwritten", "handwriting",
+    "read this note", "read the note", "read this document",
+    "what does this note say", "what does this say", "digitize",
+    "ocr", "scan this document", "scan this note", "scan this page",
+    "extract the text", "extract text",
+)
+
+
+def _is_document_scan_request(prompt: str) -> bool:
+    lowered = (prompt or "").lower()
+    return any(kw in lowered for kw in _DOCUMENT_SCAN_KEYWORDS)
 
 
 class CodeGenerationError(Exception):
@@ -505,6 +525,38 @@ def _build_reasoning_prompt(original_prompt: str, moondream_observation: str) ->
     )
 
 
+def _build_ocr_result_prompt(original_prompt: str, tool_observation: dict) -> str:
+    """
+    Passes Tesseract's raw transcription to Qwen for cleanup/answering —
+    Qwen is explicitly told this is unverified raw OCR (never scene
+    description) so it can flag garbled output honestly instead of
+    presenting noisy OCR as a confident, clean transcription.
+    """
+    if not tool_observation.get("available", True):
+        return (
+            f"The user asked to scan/transcribe an uploaded image (\"{original_prompt}\"), "
+            f"but OCR is not available on this machine (tesseract-ocr is not installed). "
+            f"Tell the user this plainly — do not guess at what the document might say."
+        )
+    text = (tool_observation.get("text") or "").strip()
+    if not text:
+        return (
+            f"The user asked to scan/transcribe an uploaded image (\"{original_prompt}\"), "
+            f"but OCR found no readable text in it (the image may be blank, too blurry, or "
+            f"not actually text). Tell the user that plainly — do not invent content."
+        )
+    return (
+        f"The user asked to scan/transcribe an uploaded image: \"{original_prompt}\"\n\n"
+        f"Raw, UNVERIFIED OCR output from that image (Tesseract, not a language model — "
+        f"it may contain misread characters, especially for cursive handwriting):\n"
+        f"---\n{text}\n---\n\n"
+        f"Present this to the user as the transcription, lightly cleaning up obvious OCR "
+        f"noise (stray characters, broken line breaks) WITHOUT changing the actual wording "
+        f"or inventing words that aren't recognizable in the raw text above. If large parts "
+        f"look too garbled to trust, say so honestly instead of presenting a confident guess."
+    )
+
+
 def _build_code_result_prompt(original_prompt: str, tool_observation: dict) -> str:
     stdout = tool_observation.get("stdout", "")
     stderr = tool_observation.get("stderr", "")
@@ -647,6 +699,13 @@ def decide_next_step(state: TaskState) -> NextStep:
     # --- Step 0: nothing executed yet -> decide the entry point ---
     if n == 0:
         if state.task_type == "vision":
+            if _is_document_scan_request(state.prompt):
+                print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(scan_document) (handwritten/document scan request)")
+                return NextStep(
+                    action="call_tool",
+                    tool_name="scan_document",
+                    tool_args={"image_base64": state.file_base64},
+                )
             print(f"[PLANNER] task_id={state.task_id} step0 -> call_moondream (vision entry point)")
             return NextStep(
                 action="call_moondream",
@@ -887,6 +946,11 @@ def decide_next_step(state: TaskState) -> NextStep:
                 return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=chat_prompt)
             reasoning_prompt = _build_docsearch_prompt(state.prompt, last.observation or {})
             print(f"[PLANNER] task_id={state.task_id} search_docs observed -> chaining to call_qwen")
+            return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
+
+        if last.tool_name == "scan_document":
+            reasoning_prompt = _build_ocr_result_prompt(state.prompt, last.observation or {})
+            print(f"[PLANNER] task_id={state.task_id} scan_document observed -> chaining to call_qwen")
             return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
 
         if last.tool_name == "generate_file":

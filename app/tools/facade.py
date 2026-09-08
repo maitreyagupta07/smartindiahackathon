@@ -25,6 +25,7 @@ from . import sandbox
 from . import docsearch
 from . import filegen
 from . import doc_extract
+from . import ocr
 
 
 class DocumentIngestError(Exception):
@@ -61,6 +62,16 @@ async def search_docs(query: str, top_k: int = 3, chat_id: str | None = None) ->
         results = await asyncio.to_thread(docsearch.search_docs, query, top_k)
     print(f"[TOOLS] search_docs result_count={len(results)}")
     return {"results": results}
+
+
+async def scan_document(image_base64: str) -> dict:
+    """Contract-equivalent shape: {"text": str, "char_count": int,
+    "available": bool}. See app/tools/ocr.py for what this actually does
+    and why it's a separate CPU-only tool from the Moondream vision path."""
+    print("[TOOLS] scan_document")
+    result = await asyncio.to_thread(ocr.scan_handwritten_image, image_base64)
+    print(f"[TOOLS] scan_document done available={result.get('available')} char_count={result.get('char_count')}")
+    return result
 
 
 async def generate_file(file_type: str, content: dict) -> dict:

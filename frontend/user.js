@@ -69,6 +69,7 @@ const TOOL_LABELS = {
   execute_code: 'Code Execution (Sandbox)',
   search_docs: 'Document Search',
   generate_file: 'Generate File',
+  scan_document: 'Handwritten Document Scan (OCR)',
 };
 
 /** Every tool actually called for this task, in call order, with its real
@@ -814,6 +815,7 @@ function renderGraph(state) {
     { key: 'search_docs', label: TOOL_LABELS.search_docs },
     { key: 'execute_code', label: TOOL_LABELS.execute_code },
     { key: 'generate_file', label: TOOL_LABELS.generate_file },
+    { key: 'scan_document', label: TOOL_LABELS.scan_document },
   ];
   const usedToolKeys = new Set(state.toolCalls.map((c) => c.tool_name));
   const toolBranches = knownTools.concat(

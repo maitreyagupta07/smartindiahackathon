@@ -29,7 +29,7 @@ from .planner import (
     strip_markdown_emphasis,
 )
 from ..inference.client import call_inference
-from ..tools.facade import execute_code, search_docs, generate_file
+from ..tools.facade import execute_code, search_docs, generate_file, scan_document
 from ..schemas.task import ExecuteTaskRequest, ExecuteTaskResponse, TaskResult
 
 _FILEGEN_MARKERS = (FILEGEN_CODE_MARKER, FILEGEN_CONTENT_MARKER)
@@ -52,6 +52,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
         "execute_code": execute_code,
         "search_docs": search_docs,
         "generate_file": generate_file,
+        "scan_document": scan_document,
     }
 
     state = TaskState(
