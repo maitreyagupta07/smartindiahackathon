@@ -31,8 +31,18 @@ async def call_inference(
     payload = {"model": model, "prompt": prompt, "stream": False}
     if image_base64:
         payload["images"] = [image_base64]
+    # repeat_penalty is set on every call (unlike temperature, which stays
+    # opt-in) — Ollama's own default (1.1) is mild enough that this small,
+    # quantized model can still fall into visible verbatim-repetition loops
+    # on longer generations (observed live: a requested poem degenerated
+    # into the same two lines repeating for several stanzas). A somewhat
+    # stronger default measurably reduces that failure mode across every
+    # call site — document content, code, chat answers alike — without
+    # needing each caller to opt in individually.
+    options = {"repeat_penalty": 1.3}
     if temperature is not None:
-        payload["options"] = {"temperature": temperature}
+        options["temperature"] = temperature
+    payload["options"] = options
 
     url = _get_inference_url()
     print(f"[INFERENCE_CLIENT] -> model={model} url={url} has_image={bool(image_base64)}")
