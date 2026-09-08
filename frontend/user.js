@@ -769,7 +769,7 @@ function openGraph() {
 function closeGraph() {
   graphOpen = false;
   document.getElementById('graph-overlay').classList.remove('open');
-  closeDrawer();
+  NodePopover.hide(true);
 }
 
 function renderGraphEmpty() {
@@ -865,146 +865,343 @@ function renderGraph(state) {
     </div>`;
 
   canvas.querySelectorAll('[data-node]').forEach((el) => {
-    el.addEventListener('click', () => openDrawerFor(el.dataset.node, state));
+    const key = el.dataset.node;
+    el.addEventListener('mouseenter', () => NodePopover.peek(key, state, el));
+    el.addEventListener('mouseleave', () => NodePopover.unpeek(el));
+    el.addEventListener('click', (e) => { e.stopPropagation(); NodePopover.togglePin(key, state, el); });
+    el.addEventListener('focus', () => NodePopover.peek(key, state, el));
+    el.addEventListener('blur', () => NodePopover.unpeek(el));
     el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDrawerFor(el.dataset.node, state); }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); NodePopover.togglePin(key, state, el); }
     });
   });
+
+  // Keep a pinned/hovered popover pointed at the freshly rendered node.
+  NodePopover.reanchor(state);
 }
 
 /* ============================================================
-   Drawer
+   Node inspector — a compact contextual popover anchored to the
+   selected execution-graph node. Hover peeks, click pins, click
+   away / Escape / closing the graph dismisses it. It is NOT a
+   side panel: it stays inside the graph overlay, repositions to
+   the side with the most room, and clamps to the viewport so it
+   never covers the graph path.
+
+   Every field is derived only from what the backend actually
+   reports for this task — prompt, status, the real per-step
+   execution trace (task.steps -> modelSteps / toolCalls /
+   routingBranches), result.type/text/file_name/file_url/sources,
+   error, timing. Anything not in the trace is omitted or shown
+   as a neutral "Not available" — never invented, never a guess.
    ============================================================ */
-function openDrawerFor(nodeKey, state) {
-  const drawer = document.getElementById('drawer');
-  const overlay = document.getElementById('drawer-overlay');
-  const title = document.getElementById('drawer-title');
-  const statusPill = document.getElementById('drawer-status');
-  const body = document.getElementById('drawer-body');
 
-  const t = currentTask;
-  let heading = nodeKey, status = 'pending', desc = '', kv = [];
+function nodeStatusMeta(s) {
+  switch (s) {
+    case 'active': return { label: 'ACTIVE', cls: 'active' };
+    case 'completed': return { label: 'COMPLETED', cls: 'completed' };
+    case 'error': return { label: 'FAILED', cls: 'error' };
+    case 'na': return { label: 'NOT USED', cls: 'na' };
+    default: return { label: 'QUEUED', cls: 'pending' };
+  }
+}
 
-  const setPill = (s) => {
-    statusPill.className = `status-pill ${s}`;
-    statusPill.textContent = s.toUpperCase();
+function modelModality(model) {
+  if (!model) return null;
+  const m = String(model).toLowerCase();
+  if (m.includes('moondream')) return 'Vision · image understanding';
+  if (m.includes('lora')) return 'Text · fine-tuned approval-note adapter';
+  if (m.includes('qwen')) return 'Text · instruction-tuned language model';
+  return 'Local model';
+}
+
+function fileExtLabel(name) {
+  const ext = (name || '').split('.').pop();
+  return ext && ext !== name ? ext.toUpperCase() : 'Not available';
+}
+
+function outputSummary(t) {
+  const r = (t && t.result) || {};
+  if (r.type === 'file') return r.file_name || 'file generated';
+  if (r.text) return truncate(r.text.replace(/\s+/g, ' ').trim(), 160);
+  return null;
+}
+
+/**
+ * Build the popover model for one node:
+ *   { eyebrow, title, status:{label,cls}, rows:[{k,v,mono}], actions:[...], note }
+ * A row whose value is null/'' renders as a muted "Not available".
+ */
+function buildNodePopover(nodeKey, state) {
+  const t = currentTask || {};
+  const r = t.result || {};
+  const rows = [];
+  const actions = [];
+  let eyebrow = 'Stage', title = nodeKey, statusStr = 'pending', note = '';
+
+  const fileActions = () => {
+    if (r.type === 'file' && r.file_url) {
+      actions.push({ label: 'Open', href: r.file_url, icon: 'lucide:external-link' });
+      actions.push({ label: 'Download', href: r.file_url, download: true, icon: 'lucide:download' });
+    }
   };
 
   if (nodeKey.startsWith('route-')) {
+    // MODEL node — one route pill. Uses the real multi-model trace.
     const branch = nodeKey.replace('route-', '');
-    heading = routeLabelFor(branch) || branch;
+    const model = { text: 'qwen2.5:1.5b-instruct', vision: 'moondream', lora: 'approval-note-lora' }[branch] || branch;
     const isUsed = state.routingBranches.includes(branch);
-    status = isUsed ? 'completed' : state.routingBranches.length ? 'na' : 'pending';
     const modelsOnBranch = state.modelSteps.filter((s) => routeForModel(s.model_used) === branch);
-    if (isUsed) {
-      desc = state.routingBranches.length > 1
-        ? 'One of MULTIPLE models actually used for this task — see the full call order on the Routing node.'
-        : 'This is the route the router actually selected for this task.';
-      if (modelsOnBranch.length) {
-        kv = modelsOnBranch.map((s, i) => ({ k: `Call ${i + 1}`, v: `${s.action === 'call_moondream' ? 'Vision call' : 'Text call'} · ${s.status}` }));
-      }
-    } else {
-      desc = status === 'na' ? 'Not one of the routes taken for this task.' : 'Routing decision not yet resolved.';
+    eyebrow = 'Model';
+    title = routeLabelFor(branch) || branch;
+    statusStr = isUsed
+      ? (t.status === 'failed' ? 'error' : t.status === 'completed' ? 'completed' : 'active')
+      : (state.routingBranches.length ? 'na' : 'pending');
+    rows.push({ k: 'Model', v: model, mono: true });
+    rows.push({ k: 'Modality', v: modelModality(model) });
+    if (isUsed && modelsOnBranch.length) {
+      modelsOnBranch.forEach((s, i) => rows.push({
+        k: `Call ${i + 1}`,
+        v: `${s.action === 'call_moondream' ? 'Vision' : 'Text'} · ${s.status === 'ok' ? 'succeeded' : 'failed'}`,
+      }));
     }
+    if (isUsed && state.routingBranches.length > 1) {
+      note = 'One of multiple models used for this task — full call order is on the Routing node.';
+    } else if (statusStr === 'na') {
+      note = 'Not a route taken for this task.';
+    }
+    if (isUsed && statusStr === 'completed') { rows.push({ k: 'Output', v: outputSummary(t) }); fileActions(); }
   } else if (nodeKey.startsWith('tool-')) {
+    // TOOL / KNOWLEDGE / CODE-EXECUTION / FILE-GENERATION node — one tool pill.
     const branch = nodeKey.replace('tool-', '');
-    const callsOnBranch = state.toolCalls.filter((c) => c.tool_name === branch);
+    const calls = state.toolCalls.filter((c) => c.tool_name === branch);
+    eyebrow = 'Knowledge / Tool';
     if (branch === 'na') {
-      heading = 'No tool call';
-      status = state.stages.tool === 'pending' ? 'pending' : state.toolCalls.length ? 'na' : 'completed';
-      desc = status === 'completed'
-        ? 'Confirmed from the real execution trace: the model answered directly, with no tool call in this task.'
-        : 'A tool was actually called for this task — see the active pill(s) instead.';
+      title = 'No Tool Call';
+      statusStr = state.stages.tool === 'pending' ? 'pending' : state.toolCalls.length ? 'na' : 'completed';
+      note = statusStr === 'completed'
+        ? 'Confirmed from the execution trace: the model answered directly, with no tool call.'
+        : 'A tool was called for this task — see the active pill(s).';
     } else {
-      heading = TOOL_LABELS[branch] || branch;
-      status = callsOnBranch.length ? (callsOnBranch.some((c) => c.status === 'error') ? 'error' : 'completed') : (state.stages.tool === 'pending' ? 'pending' : 'na');
-      if (callsOnBranch.length) {
-        desc = `Called ${callsOnBranch.length} time${callsOnBranch.length === 1 ? '' : 's'} during this task's execution.`;
-        kv = callsOnBranch.map((c, i) => ({ k: `Call ${i + 1}`, v: c.status === 'ok' ? 'Succeeded' : 'Failed' }));
-        if (branch === 'generate_file' && t.result && t.result.file_name) kv.push({ k: 'Output File', v: t.result.file_name });
+      title = TOOL_LABELS[branch] || branch;
+      statusStr = calls.length
+        ? (calls.some((c) => c.status === 'error') ? 'error' : 'completed')
+        : (state.stages.tool === 'pending' ? 'pending' : 'na');
+      if (calls.length) {
+        calls.forEach((c, i) => rows.push({ k: `Call ${i + 1}`, v: c.status === 'ok' ? 'Succeeded' : 'Failed' }));
+        if (branch === 'generate_file' && r.file_name) {
+          rows.push({ k: 'File type', v: fileExtLabel(r.file_name) });
+          rows.push({ k: 'Filename', v: r.file_name, mono: true });
+          fileActions();
+        }
+        if (branch === 'search_docs' && Array.isArray(r.sources) && r.sources.length) {
+          rows.push({ k: 'Query', v: t.prompt ? truncate(t.prompt, 120) : null });
+          rows.push({ k: 'Results', v: String(r.sources.length) });
+          rows.push({ k: 'Sources', v: r.sources.slice(0, 4).map((s) => s.filename + (s.page != null ? ` p.${s.page}` : '')).join(', '), mono: true });
+        }
       } else {
-        desc = status === 'na' ? 'This tool was not called for this task.' : '';
+        note = statusStr === 'na' ? 'This tool was not called for this task.' : '';
       }
     }
   } else {
-    const s = state.stages[nodeKey];
-    heading = NODE_META[nodeKey].title();
-    status = s === 'active' ? 'active' : s === 'completed' ? 'completed' : s === 'error' ? 'error' : s === 'na' ? 'na' : 'pending';
+    statusStr = state.stages[nodeKey] || 'pending';
 
     if (nodeKey === 'task') {
-      status = 'completed';
-      desc = 'The original request submitted by the user.';
-      kv = [
-        { k: 'Task ID', v: t.task_id },
-        { k: 'Submitted', v: new Date(t.submitted_at_client).toLocaleString() },
-        { k: 'Prompt', v: truncate(t.prompt, 80) },
-        t.file_name ? { k: 'Attachment', v: t.file_name } : null,
-      ].filter(Boolean);
+      eyebrow = 'Task';
+      title = 'Request';
+      statusStr = t.status === 'completed' ? 'completed' : t.status === 'failed' ? 'error' : (t.status ? 'active' : 'pending');
+      rows.push({ k: 'Prompt', v: t.prompt ? truncate(t.prompt, 220) : null });
+      rows.push({ k: 'Status', v: (t.status || 'queued').toUpperCase() });
+      if (t.file_name) rows.push({ k: 'Input file', v: t.file_name, mono: true });
+      rows.push({ k: 'Submitted', v: t.submitted_at_client ? new Date(t.submitted_at_client).toLocaleTimeString() : null });
+      rows.push({ k: 'Task ID', v: t.task_id ? t.task_id.slice(0, 8) : 'pending', mono: true });
     } else if (nodeKey === 'classification') {
-      desc = status === 'pending' ? '' : 'The system determined how this request should be handled.';
-      if (status !== 'pending') kv = [{ k: 'Status', v: status === 'active' ? 'In progress' : 'Resolved' }];
+      eyebrow = 'Classification';
+      title = 'Task-Type Detection';
+      rows.push({ k: 'Status', v: statusStr === 'active' ? 'In progress' : statusStr === 'completed' ? 'Resolved' : 'Queued' });
+      if (statusStr === 'completed') {
+        rows.push({ k: 'Detected route', v: state.routingBranches.map((b) => routeLabelFor(b)).filter(Boolean).join(' → ') || null });
+        rows.push({ k: 'Result kind', v: r.type || null });
+      }
+      note = 'Task-type is reconciled from the finished result — the status API does not expose it mid-run.';
     } else if (nodeKey === 'routing') {
+      eyebrow = 'Routing';
+      title = 'Model & Compute Logic';
       const models = modelsUsedList(t);
-      desc = status === 'pending' ? '' : models.length > 1
-        ? `MULTIPLE models were used for this task, in this order — a real multi-step chain, not a single call.`
-        : 'Selects which local model handles the request.';
+      // Real per-call and total token usage (from Ollama's own
+      // prompt_eval_count/eval_count) — replaces the old "not exposed"
+      // placeholder now that app/agent/state.py's token_totals is wired
+      // all the way through to the task-status response.
       const tokenUsageLabel = (t.token_usage && typeof t.token_usage.total_tokens === 'number')
         ? `${t.token_usage.total_tokens} tok (${t.token_usage.prompt_tokens ?? 0} in / ${t.token_usage.completion_tokens ?? 0} out) — real, from Ollama`
         : 'Not available for this task';
       if (state.modelSteps.length) {
-        // Real per-call trace: exact model + action + status + real per-call
-        // token usage (from Ollama's own prompt_eval_count/eval_count).
-        kv = state.modelSteps.map((s, i) => ({
+        state.modelSteps.forEach((s, i) => rows.push({
           k: `${i + 1}. ${s.action === 'call_moondream' ? 'Vision' : 'Text'} call`,
           v: `${s.model_used} · ${s.status === 'ok' ? 'succeeded' : 'failed'}` +
             ((typeof s.prompt_tokens === 'number' || typeof s.completion_tokens === 'number') ? ` · ${s.prompt_tokens ?? 0}+${s.completion_tokens ?? 0} tok` : ''),
+          mono: true,
         }));
-        kv.push({ k: 'Total Token Usage', v: tokenUsageLabel });
+        if (models.some((m) => String(m).toLowerCase().includes('lora'))) rows.push({ k: 'LoRA adapter', v: 'approval-note-lora (in use)' });
+        rows.push({ k: 'Total token usage', v: tokenUsageLabel });
+        if (models.length > 1) note = 'Multiple models were chained for this task, in the order shown — a real multi-step chain.';
       } else if (models.length) {
-        kv = [{ k: 'Model Selected', v: models.join(' → ') }, { k: 'Status', v: 'Resolved' }, { k: 'Total Token Usage', v: tokenUsageLabel }];
-      } else if (status === 'active') kv = [{ k: 'Status', v: 'Resolving…' }];
+        rows.push({ k: 'Selected model', v: models.join(' → '), mono: true });
+        rows.push({ k: 'Model type', v: modelModality(models[0]) });
+        rows.push({ k: 'Total token usage', v: tokenUsageLabel });
+      } else {
+        rows.push({ k: 'Selected model', v: statusStr === 'active' ? 'Resolving…' : null });
+        rows.push({ k: 'Total token usage', v: tokenUsageLabel });
+      }
     } else if (nodeKey === 'tool') {
-      desc = status === 'na' ? 'Confirmed from the real execution trace: no tool was called for this result.' : status === 'pending' ? '' : `${state.toolCalls.length} tool call${state.toolCalls.length === 1 ? '' : 's'} made during this task, in order.`;
+      eyebrow = 'Knowledge / Tool';
+      title = 'Tool & Knowledge Activity';
       if (state.toolCalls.length) {
-        kv = state.toolCalls.map((c, i) => ({ k: `${i + 1}. ${c.label}`, v: c.status === 'ok' ? 'Succeeded' : 'Failed' }));
-        if (t.result && t.result.file_name) kv.push({ k: 'Output File', v: t.result.file_name });
+        state.toolCalls.forEach((c, i) => rows.push({ k: `${i + 1}. ${c.label}`, v: c.status === 'ok' ? 'Succeeded' : 'Failed' }));
+        if (r.file_name) { rows.push({ k: 'Output file', v: r.file_name, mono: true }); fileActions(); }
+        if (Array.isArray(r.sources) && r.sources.length) {
+          rows.push({ k: 'Retrieved', v: `${r.sources.length} passage${r.sources.length === 1 ? '' : 's'}` });
+          rows.push({ k: 'Sources', v: r.sources.slice(0, 4).map((s) => s.filename + (s.page != null ? ` p.${s.page}` : '')).join(', '), mono: true });
+        }
+      } else {
+        statusStr = state.stages.tool;
+        note = statusStr === 'na'
+          ? 'Confirmed from the execution trace: no tool was called for this result.'
+          : 'No tool or knowledge-base call has been recorded yet.';
       }
     } else if (nodeKey === 'validation') {
-      desc = status === 'error' ? 'The task returned an error.' : status === 'completed' ? 'Result returned without a reported error.' : '';
-      if (t.error) kv = [{ k: 'Error', v: t.error }];
+      eyebrow = 'Validation';
+      title = 'Result Validation';
+      rows.push({ k: 'Outcome', v: statusStr === 'error' ? 'Returned an error' : statusStr === 'completed' ? 'No error reported' : null });
+      if (t.error) rows.push({ k: 'Error', v: truncate(t.error, 200) });
     } else if (nodeKey === 'deliverable') {
-      if (status === 'completed' && t.result) {
-        desc = t.result.type === 'file' ? 'A generated file is ready.' : 'A text result was returned.';
-        kv = [
-          { k: 'Type', v: t.result.type || '—' },
-          t.result.file_name ? { k: 'File', v: t.result.file_name } : null,
-          { k: 'Duration', v: timeAgoOrDuration(t.started_at, t.completed_at) },
-        ].filter(Boolean);
-      } else if (status === 'error') {
-        desc = 'No deliverable — the task failed.';
+      eyebrow = 'Result';
+      title = 'Deliverable';
+      rows.push({ k: 'Result type', v: r.type || null });
+      rows.push({ k: 'Completion', v: (t.status || '').toUpperCase() || null });
+      if (statusStr === 'completed') {
+        rows.push({ k: 'Summary', v: outputSummary(t) });
+        rows.push({ k: 'Duration', v: (t.started_at && t.completed_at) ? timeAgoOrDuration(t.started_at, t.completed_at) : null });
+        fileActions();
+      } else if (statusStr === 'error') {
+        note = 'No deliverable — the task failed.';
       }
+    } else {
+      title = (NODE_META[nodeKey] && NODE_META[nodeKey].title()) || nodeKey;
     }
   }
 
-  setPill(status);
-  title.textContent = heading;
+  return { eyebrow, title, status: nodeStatusMeta(statusStr), rows, actions, note };
+}
 
-  if (status === 'pending' || (status === 'na' && kv.length === 0 && !desc)) {
-    body.innerHTML = `<div class="drawer-empty"><iconify-icon icon="lucide:lock"></iconify-icon><p>Not yet reached in this task's execution.</p></div>`;
-  } else {
-    body.innerHTML = `
-      ${desc ? `<p class="drawer-desc">${escapeHtml(desc)}</p>` : ''}
-      ${kv.map((row) => `<div class="kv-row"><span class="k">${escapeHtml(row.k)}</span><span class="v">${escapeHtml(row.v)}</span></div>`).join('')}
+const NodePopover = {
+  el: null,
+  pinnedKey: null,
+  anchorEl: null,
+  hoverKey: null,
+
+  _root() { return this.el || (this.el = document.getElementById('node-popover')); },
+
+  render(nodeKey, state) {
+    const m = buildNodePopover(nodeKey, state);
+    const pop = this._root();
+    const rowsHtml = m.rows.map((row) => {
+      const val = (row.v === null || row.v === undefined || row.v === '')
+        ? '<span class="np-na">Not available</span>'
+        : `<span class="np-v${row.mono ? ' mono' : ''}">${escapeHtml(String(row.v))}</span>`;
+      return `<div class="np-row"><span class="np-k">${escapeHtml(row.k)}</span>${val}</div>`;
+    }).join('');
+    const actionsHtml = m.actions.length
+      ? `<div class="np-actions">${m.actions.map((a) =>
+          `<a class="np-btn" href="${a.href}" ${a.download ? 'download' : 'target="_blank" rel="noopener"'}>` +
+          `<iconify-icon icon="${a.icon}" style="font-size:13px"></iconify-icon>${escapeHtml(a.label)}</a>`).join('')}</div>`
+      : '';
+    pop.className = `node-popover ${m.status.cls}${this.pinnedKey === nodeKey ? ' pinned' : ''}`;
+    pop.innerHTML = `
+      <div class="np-head">
+        <div>
+          <div class="np-eyebrow">${escapeHtml(m.eyebrow)}</div>
+          <div class="np-title">${escapeHtml(m.title)}</div>
+        </div>
+        <span class="status-pill ${m.status.cls}">${m.status.label}</span>
+      </div>
+      ${rowsHtml ? `<div class="np-body">${rowsHtml}</div>` : ''}
+      ${m.note ? `<p class="np-note">${escapeHtml(m.note)}</p>` : ''}
+      ${actionsHtml}
+      ${this.pinnedKey === nodeKey ? '<div class="np-pinned-hint"><iconify-icon icon="lucide:pin" style="font-size:11px"></iconify-icon>Pinned · click the node again or press Esc to close</div>' : ''}
     `;
-  }
+    pop.hidden = false;
+    void pop.offsetWidth; // force reflow so the enter transition always runs
+    pop.classList.add('visible');
+  },
 
-  drawer.classList.add('open');
-  overlay.classList.add('open');
-}
-function closeDrawer() {
-  document.getElementById('drawer').classList.remove('open');
-  document.getElementById('drawer-overlay').classList.remove('open');
-}
+  position(anchorEl) {
+    const pop = this._root();
+    if (!anchorEl) return;
+    const a = anchorEl.getBoundingClientRect();
+    const pw = pop.offsetWidth, ph = pop.offsetHeight;
+    const gap = 12, margin = 10;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let left, top, place;
+    const spaceRight = vw - a.right, spaceLeft = a.left;
+    if (spaceRight >= pw + gap + margin) { left = a.right + gap; place = 'right'; }
+    else if (spaceLeft >= pw + gap + margin) { left = a.left - gap - pw; place = 'left'; }
+    else { left = Math.min(Math.max(margin, a.left + a.width / 2 - pw / 2), vw - pw - margin); place = (a.top > vh / 2) ? 'top' : 'bottom'; }
+
+    if (place === 'right' || place === 'left') top = a.top + a.height / 2 - ph / 2;
+    else if (place === 'bottom') top = a.bottom + gap;
+    else top = a.top - gap - ph;
+    top = Math.min(Math.max(margin, top), vh - ph - margin);
+    left = Math.min(Math.max(margin, left), vw - pw - margin);
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+    pop.dataset.place = place;
+  },
+
+  peek(nodeKey, state, anchorEl) {
+    if (this.pinnedKey) return;
+    this.hoverKey = nodeKey;
+    this.anchorEl = anchorEl;
+    this.render(nodeKey, state);
+    this.position(anchorEl);
+  },
+
+  unpeek(anchorEl) {
+    if (this.pinnedKey) return;
+    if (anchorEl && anchorEl !== this.anchorEl) return;
+    this.hoverKey = null;
+    this.hide();
+  },
+
+  togglePin(nodeKey, state, anchorEl) {
+    if (this.pinnedKey === nodeKey) { this.hide(true); return; }
+    this.pinnedKey = nodeKey;
+    this.anchorEl = anchorEl;
+    this.render(nodeKey, state);
+    this.position(anchorEl);
+  },
+
+  reanchor(state) {
+    const key = this.pinnedKey || this.hoverKey;
+    if (!key) return;
+    const el = document.querySelector(`#graph-canvas [data-node="${key}"]`);
+    if (!el) { this.hide(true); return; }
+    this.anchorEl = el;
+    this.render(key, state);
+    this.position(el);
+  },
+
+  hide(force) {
+    if (force) this.pinnedKey = null;
+    if (this.pinnedKey) return;
+    const pop = this._root();
+    pop.classList.remove('visible');
+    this.anchorEl = null;
+    setTimeout(() => { if (!pop.classList.contains('visible')) pop.hidden = true; }, 160);
+  },
+
+  isOpen() { return !!this.pinnedKey || !!this.hoverKey; },
+};
 
 /* ============================================================
    Notifications — browser Notification API only, gated on the
@@ -1366,6 +1563,144 @@ function wireSpeakButtons() {
   });
 }
 
+/* ============================================================
+   Task template library — one-click prompt starters for
+   industrial knowledge work. A template only FILLS the composer
+   (it never auto-sends), so the operator can attach the relevant
+   files / paste a transcript / edit wording first. Each prompt is
+   written to run through the existing agent + tools + KB +
+   file-generation flow — nothing here is a hardcoded answer path
+   and nothing asks for a capability the local models don't have.
+   ============================================================ */
+const TASK_TEMPLATES = [
+  { id: 'exec-summary', label: 'Executive Summary', icon: 'lucide:file-text', group: 'Summarize & extract', needs: 'doc', featured: true,
+    prompt: 'Produce an executive summary of the attached document. Use these sections: Purpose, Key Points (bullets), Decisions or Findings, Risks / Open Issues, Recommended Next Steps. Keep it under 200 words and use only information present in the document.' },
+  { id: 'tech-findings', label: 'Extract Technical Findings', icon: 'lucide:search-check', group: 'Summarize & extract', needs: 'doc', featured: true,
+    prompt: 'From the attached document, extract every technical finding as a numbered list. For each finding give: Finding, Location / Equipment, Severity (as stated, or "not stated"), Evidence / Measurement, Recommended action. Do not infer values that are not written in the document.' },
+  { id: 'action-items', label: 'Extract Action Items', icon: 'lucide:list-checks', group: 'Summarize & extract', needs: 'doc',
+    prompt: 'From the attached document or pasted transcript, extract every action item as a table with columns: Owner | Action | Due date | Source line. Then list any implied-but-unassigned actions separately. Use only what the text supports.' },
+
+  { id: 'review-inspection', label: 'Review Inspection Report', icon: 'lucide:clipboard-check', group: 'Review & verify', needs: 'doc', featured: true,
+    prompt: 'Review the attached inspection report against standard inspection-reporting practice. Report: missing mandatory sections; each finding and its priority classification; whether a formal Approval Note is required and to what approval level; and the Next Inspection Due date. Ground every point in the report and the inspection-reporting manual in the knowledge base.' },
+  { id: 'validate-code', label: 'Validate / Verify Code', icon: 'lucide:code-2', group: 'Review & verify', needs: 'paste',
+    prompt: 'Review the following code for correctness, edge cases, and safety, then run it in the sandbox and report the actual output. Sections: Summary, Issues Found (severity-ranked), Suggested Fix, Execution Result.\n\n```python\n# paste the code here\n```' },
+  { id: 'check-calc', label: 'Check Calculation', icon: 'lucide:calculator', group: 'Review & verify', needs: 'paste',
+    prompt: 'Verify this calculation by computing it independently in the sandbox. Show: Restated inputs, Method, Computed result, Whether it matches the stated result, and any discrepancy.\n\nCalculation to check: ' },
+  { id: 'find-inconsistencies', label: 'Find Inconsistencies', icon: 'lucide:git-compare-arrows', group: 'Review & verify', needs: 'doc',
+    prompt: 'Identify internal inconsistencies, contradictions, or values that do not add up in the attached document(s). For each: what conflicts, where it appears, and which value is more likely correct. If none, say so explicitly.' },
+
+  { id: 'compare-docs', label: 'Compare Documents', icon: 'lucide:columns-2', group: 'Compare & analyze', needs: 'docs2', featured: true,
+    prompt: 'Compare the attached documents. Report: 1) Changed values / clauses (old -> new), 2) Additions, 3) Removals, 4) Contradictions or inconsistencies, 5) Possible operational / business impact, 6) Recommended follow-up actions. Use only content present in the documents and name which document each point comes from.' },
+  { id: 'assess-impact', label: 'Assess Possible Impact', icon: 'lucide:activity', group: 'Compare & analyze', needs: 'doc',
+    prompt: 'Assess the possible operational, safety, and business impact of the issue described in the attached document / my message. Sections: Situation, Direct impact, Downstream / secondary impact, Worst case, Mitigations. State every assumption explicitly.' },
+  { id: 'recommend-actions', label: 'Recommend Next Actions', icon: 'lucide:list-todo', group: 'Compare & analyze', needs: 'doc',
+    prompt: 'Based on the attached document, give a prioritized checklist of recommended next actions. For each: action, owner / role (as stated or "unassigned"), rationale, and urgency. Use only what the document supports.' },
+  { id: 'analyze-proposal', label: 'Analyze Vendor / Technical Proposal', icon: 'lucide:file-search', group: 'Compare & analyze', needs: 'doc',
+    prompt: 'Analyze the attached vendor / technical proposal. Sections: Scope offered, Commercial terms, Technical strengths, Gaps or risks, Compliance with our requirements, Clarifications to request, Overall recommendation. Ground each point in the proposal text.' },
+
+  { id: 'meeting-minutes', label: 'Prepare Meeting Minutes', icon: 'lucide:notebook-pen', group: 'Draft & minutes', needs: 'transcript', featured: true,
+    prompt: 'Turn the attached or pasted meeting transcript into formal minutes. Sections: Attendees (if stated), Agenda, Discussion summary, Decisions, Action Items (owner - task - due date), Unresolved Issues. Use only the transcript — do not add commitments, owners, or dates that are not in it.\n\nTranscript:\n' },
+  { id: 'draft-approval-note', label: 'Draft Approval Note', icon: 'lucide:stamp', group: 'Draft & minutes', needs: 'doc', featured: true,
+    prompt: 'Draft a formal Approval Note as a Word document for the finding described in my message / the attached report. Use the standard structure: Subject, Reference, Findings, Recommendation, Required Approval Level, Approval Status.\n\nFinding: ' },
+];
+
+const TemplateLibrary = {
+  FEATURED_LIMIT: 4,
+
+  chipHtml(tpl) {
+    return `<button class="template-chip" data-template="${tpl.id}" title="${escapeHtml(tpl.prompt.split('\n')[0])}">` +
+      `<iconify-icon icon="${tpl.icon}"></iconify-icon><span>${escapeHtml(tpl.label)}</span></button>`;
+  },
+
+  renderBars() {
+    const featured = TASK_TEMPLATES.filter((t) => t.featured).slice(0, this.FEATURED_LIMIT);
+    const moreBtn = `<button class="template-chip template-chip--more" data-template-more><iconify-icon icon="lucide:layout-grid"></iconify-icon><span>More</span></button>`;
+    const html = featured.map((t) => this.chipHtml(t)).join('') + moreBtn;
+    ['template-bar-idle', 'template-bar-docked'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = html;
+    });
+    this.wireBar();
+  },
+
+  renderSheet() {
+    const body = document.getElementById('template-sheet-body');
+    if (!body) return;
+    const groups = [];
+    TASK_TEMPLATES.forEach((t) => {
+      let g = groups.find((x) => x.name === t.group);
+      if (!g) { g = { name: t.group, items: [] }; groups.push(g); }
+      g.items.push(t);
+    });
+    const needLabel = { doc: 'attach a document', docs2: 'attach 2+ documents', transcript: 'attach / paste a transcript', paste: 'paste code or numbers', none: '' };
+    body.innerHTML = groups.map((g) => `
+      <div class="template-group">
+        <div class="template-group-label">${escapeHtml(g.name)}</div>
+        <div class="template-group-grid">
+          ${g.items.map((t) => `
+            <button class="template-card" data-template="${t.id}">
+              <span class="template-card-icon"><iconify-icon icon="${t.icon}"></iconify-icon></span>
+              <span class="template-card-body">
+                <span class="template-card-title">${escapeHtml(t.label)}</span>
+                <span class="template-card-hint">${escapeHtml(t.prompt.replace(/\n+/g, ' ').trim().slice(0, 110))}…</span>
+                ${needLabel[t.needs] ? `<span class="template-card-need"><iconify-icon icon="lucide:paperclip" style="font-size:10px"></iconify-icon>${needLabel[t.needs]}</span>` : ''}
+              </span>
+            </button>`).join('')}
+        </div>
+      </div>`).join('');
+    body.querySelectorAll('[data-template]').forEach((el) => {
+      el.addEventListener('click', () => { this.apply(el.dataset.template); this.closeSheet(); });
+    });
+  },
+
+  wireBar() {
+    document.querySelectorAll('[data-template]').forEach((el) => {
+      if (el.closest('#template-sheet-body') || el._wired) return;
+      el._wired = true;
+      el.addEventListener('click', () => this.apply(el.dataset.template));
+    });
+    document.querySelectorAll('[data-template-more]').forEach((el) => {
+      if (el._wired) return;
+      el._wired = true;
+      el.addEventListener('click', () => this.openSheet());
+    });
+  },
+
+  apply(id) {
+    const tpl = TASK_TEMPLATES.find((t) => t.id === id);
+    if (!tpl) return;
+    const active = chatMessages.length > 0;
+    const input = document.getElementById(active ? 'composer-input' : 'composer-input-idle');
+    if (!input) return;
+    input.value = tpl.prompt;
+    input.focus();
+    try { input.setSelectionRange(input.value.length, input.value.length); } catch { /* noop */ }
+    const hint = { doc: 'Attach the document, then send.', docs2: 'Attach two or more documents, then send.', transcript: 'Paste the transcript into the message (or attach it), then send.', paste: 'Paste your code / numbers into the message, then send.' }[tpl.needs];
+    if (hint) toast(hint);
+  },
+
+  openSheet() {
+    this.renderSheet();
+    const ov = document.getElementById('template-overlay');
+    if (ov) ov.hidden = false;
+  },
+  closeSheet() {
+    const ov = document.getElementById('template-overlay');
+    if (ov) ov.hidden = true;
+  },
+
+  init() {
+    this.renderBars();
+    const close = document.getElementById('template-close');
+    if (close) close.addEventListener('click', () => this.closeSheet());
+    const ov = document.getElementById('template-overlay');
+    if (ov) ov.addEventListener('click', (e) => { if (e.target === ov) this.closeSheet(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && ov && !ov.hidden) this.closeSheet();
+    });
+  },
+};
+
 /* ---------- Init ---------- */
 document.addEventListener('DOMContentLoaded', async () => {
   initComposer();
@@ -1386,13 +1721,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderTaskSidebar();
   GradientPicker.init();
   initNotifications();
+  TemplateLibrary.init();
 
   document.getElementById('maximize-activity').addEventListener('click', (e) => { e.preventDefault(); openGraph(); });
   document.getElementById('graph-close').addEventListener('click', closeGraph);
-  document.getElementById('drawer-close').addEventListener('click', closeDrawer);
-  document.getElementById('drawer-overlay').addEventListener('click', closeDrawer);
+
+  // Dismiss a pinned node popover on any click that isn't on the popover or a graph node.
+  document.addEventListener('click', (e) => {
+    if (!NodePopover.pinnedKey) return;
+    if (e.target.closest('#node-popover') || e.target.closest('#graph-canvas [data-node]')) return;
+    NodePopover.hide(true);
+  });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { closeDrawer(); if (graphOpen && !document.getElementById('drawer').classList.contains('open')) closeGraph(); }
+    if (e.key !== 'Escape') return;
+    if (NodePopover.isOpen()) { NodePopover.hide(true); return; }
+    if (graphOpen) closeGraph();
   });
 
   LIVE_BACKEND = await Api.probe();

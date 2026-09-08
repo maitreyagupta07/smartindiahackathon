@@ -10,10 +10,13 @@ Ollama, or the Tools service directly.
 ## Files
 
 - `index.html` / `user.js` — the User workbench: task sidebar (history +
-  files/deliverables), a centered composer for new tasks that transitions to
-  a docked composer once a task is active, the minimal live-state strip, the
-  maximized execution graph overlay, the node detail drawer, the notification
-  bell, and the gradient color picker.
+  files/deliverables), a one-click task-template bar above the composer (plus
+  an expandable template library), a centered composer for new tasks that
+  transitions to a docked composer once a task is active, the minimal
+  live-state strip, the maximized execution graph overlay, the contextual
+  node-inspector popover (hover to peek, click to pin — anchored to the graph
+  node, never a side panel), the notification bell, and the gradient color
+  picker.
 - `admin-login.html` — the Admin access gate (see **Admin access** below).
 - `admin.html` / `admin.js` — the Admin "Sovereign AI Operations" shell:
   Overview, Users, Task Activity, Model & Routing, Knowledge Base, Audit Log,

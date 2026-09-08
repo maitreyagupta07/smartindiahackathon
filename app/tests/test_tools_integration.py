@@ -71,7 +71,9 @@ async def test_doc_search_flow_calls_tool_then_qwen():
     assert resp.result.type == "text"
     assert resp.result.text == "Fire watch is required for hot work."
     mocked_tool.assert_awaited_once()
-    assert mocked_tool.call_args.kwargs["top_k"] == 3
+    # Plain corpus fact lookups retrieve the top 5 chunks (widened from 3 so a
+    # specific record/clause is more reliably in-context for the small model).
+    assert mocked_tool.call_args.kwargs["top_k"] == 5
     mocked_infer.assert_awaited_once()
 
 

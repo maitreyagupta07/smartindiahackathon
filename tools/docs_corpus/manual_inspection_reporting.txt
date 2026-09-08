@@ -1,5 +1,8 @@
 INSPECTION REPORTING MANUAL — Static Equipment (Vessels, Tanks, Piping)
 
+DOCUMENT ID: MAN-INSP-02
+REVISION: 3  (effective 2025-10-01)
+
 Section 1: Report Structure
 Every inspection report must contain the following sections in order:
 Equipment ID, Inspection Date, Inspector Name, Inspection Type (internal /

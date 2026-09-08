@@ -1,0 +1,110 @@
+SYNTHETIC / FICTIONAL DATA — FOR DEMO USE ONLY. All names, IDs, and contact
+details below are invented for testing the Sovereign AI Workbench knowledge
+base. They do not refer to real people.
+
+DOCUMENT ID: HR-DIR-01
+TITLE: Employee Directory — Maintenance & Inspection Division
+REVISION: 4  (effective 2026-07-01)
+CUSTODIAN: Human Resources, Meridian Refinery (fictional site)
+
+------------------------------------------------------------------------
+RECORD FORMAT
+Each record lists: Full Name | Employee ID | Department | Role | Grade |
+Work Location | Email | Reporting Manager | Date of Joining | Access Level
+------------------------------------------------------------------------
+
+Full Name: Ravi Menon
+Employee ID: EMP-1042
+Department: Static Equipment Inspection
+Role: Senior Inspection Engineer
+Grade: M3
+Work Location: Unit 200 Inspection Office, Block C
+Email: ravi.menon@meridian-refinery.example
+Reporting Manager: Priya Nair (EMP-1005)
+Date of Joining: 2017-03-13
+Access Level: L3 (process areas + inspection records read/write)
+
+Full Name: Ananya Iyer
+Employee ID: EMP-1043
+Department: Rotating Equipment
+Role: Reliability Engineer
+Grade: M2
+Work Location: Machinery Workshop, Block E
+Email: ananya.iyer@meridian-refinery.example
+Reporting Manager: Suresh Rao (EMP-1009)
+Date of Joining: 2019-08-26
+Access Level: L2 (process areas + reliability records read)
+
+Full Name: Daniel Fernandes
+Employee ID: EMP-1044
+Department: Maintenance Planning
+Role: Planning Lead
+Grade: M3
+Work Location: Planning Office, Admin Building 2nd Floor
+Email: daniel.fernandes@meridian-refinery.example
+Reporting Manager: Priya Nair (EMP-1005)
+Date of Joining: 2015-01-19
+Access Level: L3 (planning system write, approval-note routing)
+
+Full Name: Meera Krishnan
+Employee ID: EMP-1045
+Department: Static Equipment Inspection
+Role: Inspection Engineer
+Grade: M1
+Work Location: Unit 200 Inspection Office, Block C
+Email: meera.krishnan@meridian-refinery.example
+Reporting Manager: Ravi Menon (EMP-1042)
+Date of Joining: 2022-11-07
+Access Level: L2 (process areas + inspection records read)
+
+Full Name: Priya Nair
+Employee ID: EMP-1005
+Department: Inspection & Reliability
+Role: Division Head
+Grade: M5
+Work Location: Admin Building 3rd Floor
+Email: priya.nair@meridian-refinery.example
+Reporting Manager: Site Technical Director (EMP-1001)
+Date of Joining: 2009-06-02
+Access Level: L4 (division-wide approver, Unit Head sign-off authority)
+
+Full Name: Suresh Rao
+Employee ID: EMP-1009
+Department: Rotating Equipment
+Role: Section Head
+Grade: M4
+Work Location: Machinery Workshop, Block E
+Email: suresh.rao@meridian-refinery.example
+Reporting Manager: Priya Nair (EMP-1005)
+Date of Joining: 2011-04-11
+Access Level: L4 (section approver, Shift In-Charge sign-off authority)
+
+Full Name: Fatima Sheikh
+Employee ID: EMP-1051
+Department: Safety
+Role: Safety Officer
+Grade: M2
+Work Location: Safety Office, Main Gate
+Email: fatima.sheikh@meridian-refinery.example
+Reporting Manager: HSE Manager (EMP-1003)
+Date of Joining: 2020-02-17
+Access Level: L3 (permit audit, all process areas)
+
+Full Name: George Thomas
+Employee ID: EMP-1062
+Department: Maintenance Planning
+Role: Planner
+Grade: M1
+Work Location: Planning Office, Admin Building 2nd Floor
+Email: george.thomas@meridian-refinery.example
+Reporting Manager: Daniel Fernandes (EMP-1044)
+Date of Joining: 2023-09-04
+Access Level: L1 (planning system read only)
+
+------------------------------------------------------------------------
+NOTES
+- Access Level L4 and above may act as the "Unit Head" approver referenced
+  in inspection-reporting manual MAN-INSP-02, Section 4.
+- Access Level L4 (section) may act as the "Shift In-Charge" approver for
+  Priority 2 findings.
+- Directory queries: contact HR (extension 4100).

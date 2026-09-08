@@ -4,7 +4,12 @@ Per §2.5 locked-in model names:
   - text/code: qwen2.5:1.5b-instruct
   - vision:    moondream
 """
-from .classifier import classify, needs_reasoning
+from .classifier import (
+    classify,
+    needs_reasoning,
+    looks_like_comparison,
+    looks_like_transcript,
+)
 from .model_registry import get_model_for_task_type, TEXT_MODEL
 
 
@@ -36,10 +41,28 @@ async def route_task(
     """
     result = classify(prompt, file_mime_type)
 
-    if chat_id and chat_id.strip() and result.task_type == "text-generation":
+    in_chat = bool(chat_id and chat_id.strip())
+
+    if in_chat and result.task_type == "text-generation":
         print(
             f"[ROUTER] chat_id={chat_id!r} -> task_type=chat first_model={TEXT_MODEL} "
             f"(no actionable signal in message — treated as a KB/conversation question)"
+        )
+        return "chat", TEXT_MODEL, False
+
+    # Document-comparison / meeting-transcript requests made INSIDE a chat
+    # must run against that chat's uploaded documents (the chat-KB flow), not
+    # a corpus-wide doc-search. Only an explicit file-format ask
+    # (document-generation) keeps its own route, since the chat flow can't
+    # produce a file.
+    if (
+        in_chat
+        and result.task_type in ("doc-search", "text-generation")
+        and (looks_like_comparison(prompt) or looks_like_transcript(prompt))
+    ):
+        print(
+            f"[ROUTER] chat_id={chat_id!r} -> task_type=chat first_model={TEXT_MODEL} "
+            f"(comparison/transcript request — routed to chat-scoped KB flow)"
         )
         return "chat", TEXT_MODEL, False
 
