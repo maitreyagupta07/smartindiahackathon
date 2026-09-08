@@ -132,8 +132,15 @@ async def test_document_generation_flow_prepares_content_via_qwen_before_generat
 async def test_document_generation_flow_verifies_computation_before_content_prep():
     """
     Numerical/computational file requests must run execute_code first to get
-    verified data, THEN prepare structured content grounded in that data —
+    verified data, and the file content must be GROUNDED in that data —
     never trusting Qwen's own arithmetic or copying the prompt into the file.
+
+    Since execute_code's own stdout is already valid JSON (it comes out of
+    a real Python interpreter, not free-form model text — see
+    _build_content_from_verified_data), the planner builds the file content
+    directly from it in code rather than asking Qwen to re-transcribe the
+    same already-correct numbers into a second response: only ONE Qwen call
+    happens (the codegen stage), not two.
     """
     req = ExecuteTaskRequest(
         task_id="c6",
@@ -143,20 +150,13 @@ async def test_document_generation_flow_verifies_computation_before_content_prep
     )
     generated_code = "import json\nprint(json.dumps({'fib': [0, 1, 1], 'average': 0.67}))"
     exec_result = {"stdout": "{\"fib\": [0, 1, 1], \"average\": 0.67}\n", "stderr": "", "exit_code": 0}
-    prepared_content = {
-        "title": "First 3 Fibonacci Numbers",
-        "sections": [
-            {"heading": "Values", "body": "Index 0: 0\nIndex 1: 1\nIndex 2: 1"},
-            {"heading": "Summary", "body": "Average: 0.67"},
-        ],
-    }
     file_result = {"file_url": "/files/fib.xlsx", "file_name": "fib.xlsx"}
 
     with patch("app.agent.loop.execute_code", new=AsyncMock(return_value=exec_result)) as mocked_exec, \
          patch("app.agent.loop.generate_file", new=AsyncMock(return_value=file_result)) as mocked_gen, \
          patch(
              "app.agent.loop.call_inference",
-             new=AsyncMock(side_effect=[generated_code, json.dumps(prepared_content)]),
+             new=AsyncMock(return_value=generated_code),
          ) as mocked_infer:
         resp = await run_agent_loop(req)
 
@@ -164,15 +164,21 @@ async def test_document_generation_flow_verifies_computation_before_content_prep
     assert resp.result.type == "file"
     assert resp.result.file_url == "/files/fib.xlsx"
 
-    # Two Qwen calls: generate verification code, then prepare content.
-    assert mocked_infer.await_count == 2
+    # One Qwen call: generate verification code. No second call to
+    # re-transcribe already-verified data — see the docstring above.
+    assert mocked_infer.await_count == 1
     # execute_code was called with the code Qwen generated, verifying the data.
     mocked_exec.assert_awaited_once()
     assert mocked_exec.call_args.kwargs["code"] == generated_code
-    # generate_file received the prepared structured content, not the prompt.
+    # generate_file received content built directly from the verified
+    # stdout, not the prompt — one section per top-level key, in order.
     mocked_gen.assert_awaited_once()
-    assert mocked_gen.call_args.kwargs["content"] == prepared_content
+    content = mocked_gen.call_args.kwargs["content"]
     assert mocked_gen.call_args.kwargs["file_type"] == "xlsx"
+    assert content["sections"] == [
+        {"heading": "Fib", "body": "0\n1\n1"},
+        {"heading": "Average", "body": "0.67"},
+    ]
 
 
 @pytest.mark.asyncio

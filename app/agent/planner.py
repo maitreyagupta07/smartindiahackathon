@@ -449,8 +449,20 @@ def _build_filegen_content_prompt(
 ) -> str:
     """
     Asks Qwen to turn the user's request (optionally grounded in verified
-    execute_code output) into Person C's FileContent JSON schema. This is
-    the step that must NEVER be skipped in favor of copying the raw prompt.
+    execute_code output) into Person C's FileContent shape — as plain
+    TITLE:/"## Heading" text (_parse_markdown_content), NOT JSON.
+
+    This used to ask for a raw JSON object matching the FileContent
+    schema directly. Repeatedly observed live: this size/quantization of
+    model has a genuinely per-call, probabilistic failure rate at
+    strict-JSON syntax (unquoted keys, duplicate keys, trailing commas,
+    JS-style comments, runaway repetition mid-object) that survived
+    several rounds of prompt tightening, a JSON repair pass, and a retry.
+    Markdown headings have no comparable failure mode — there is no
+    bracket/quote balancing to get wrong, "## Heading" is either present
+    on a line or it isn't, and small instruct models are extensively
+    trained on exactly this format. The parser (_parse_markdown_content)
+    is correspondingly simpler than the JSON path it replaced.
     """
     # A prompt like "...in word doc then make an excel report of..." names
     # TWO different deliverables in one message; run_agent_loop now DOES
@@ -474,9 +486,9 @@ def _build_filegen_content_prompt(
         if verified_data else ""
     )
     if _looks_like_transcript(original_prompt):
-        guidance_block = f"Follow this structure — one JSON section per item:\n{_transcript_instructions()}\n\n"
+        guidance_block = f"Follow this structure — one section per item:\n{_transcript_instructions()}\n\n"
     elif _looks_like_comparison(original_prompt):
-        guidance_block = f"Follow this structure — one JSON section per numbered item:\n{_comparison_instructions()}\n\n"
+        guidance_block = f"Follow this structure — one section per numbered item:\n{_comparison_instructions()}\n\n"
     else:
         guidance_block = ""
     if state is not None and len(state.file_types) > 1 and not was_split:
@@ -499,56 +511,46 @@ def _build_filegen_content_prompt(
     else:
         scope_block = ""
     return (
-        "You are preparing structured content for a generated file.\n"
+        "You are preparing content for a generated file.\n"
         f"User request: \"{original_prompt}\"\n\n"
         f"{scope_block}"
         f"{guidance_block}"
         f"{data_block}"
-        "Respond with ONLY valid JSON (no markdown fences, no commentary) matching "
-        "exactly this schema:\n"
-        '{"title": "<short title>", "sections": [{"heading": "<heading>", "body": "<body text>"}]}\n\n'
+        "Respond with PLAIN TEXT ONLY, in exactly this format (no JSON, no code "
+        "fences, no commentary outside it):\n\n"
+        "TITLE: <a short title>\n\n"
+        "## <heading of the first section>\n"
+        "<body text for this section — can be multiple lines/paragraphs, and may use "
+        "newlines to lay out a list/table as plain text, one item per line>\n\n"
+        "## <heading of the next section, only if genuinely needed>\n"
+        "<body text>\n\n"
         "The content must fully represent what the user actually requested — include "
         "EVERY requested item/entry (not a summary and not the request text itself). "
-        "Use multiple sections only to separate genuinely different topics (e.g. one "
-        "section for the data, another for a requested summary/average) — NEVER create "
-        "one section per individual item in a single list (e.g. do not make a separate "
-        "section for each number if asked for a list of numbers). A section's \"body\" "
-        "may use newlines to lay out an entire list/table as plain text, one item per line."
+        "Use multiple \"## \" sections only to separate genuinely different topics (e.g. "
+        "one section for the data, another for a requested summary/average) — NEVER "
+        "create one section per individual item in a single list (e.g. do not make a "
+        "separate section for each number if asked for a list of numbers — list them all "
+        "in ONE section's body instead)."
     )
 
 
-_JS_LINE_COMMENT_RE = re.compile(r"//[^\n\"]*(?=\n|$)")
-_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
-_BARE_NONFINITE_RE = re.compile(r"\b(NaN|-?Infinity)\b")
-
-
-def _repair_json_like(candidate: str) -> str:
-    """
-    Cheap, targeted cleanup for the specific malformed-JSON patterns a small
-    quantized model actually produces here (observed live: a `body` value
-    containing a JS-style `// comment`, bare `NaN`, and a trailing comma —
-    none of which are valid JSON). NOT a general JSON5 parser — just strips
-    the handful of concrete mistakes seen in practice, applied only as a
-    fallback AFTER a plain json.loads has already failed once.
-    """
-    cleaned = _JS_LINE_COMMENT_RE.sub("", candidate)
-    cleaned = _BARE_NONFINITE_RE.sub("null", cleaned)
-    cleaned = _TRAILING_COMMA_RE.sub(r"\1", cleaned)
-    return cleaned
+_TITLE_LINE_RE = re.compile(r"(?im)^\s*TITLE:\s*(.+?)\s*$")
+_MARKDOWN_HEADING_RE = re.compile(r"(?m)^#{1,6}[ \t]+(.+?)[ \t]*$")
 
 
 def _stringify_content_value(value):
     """
-    A `body`/`heading` given as a JSON array (e.g. a list of numbers)
-    becomes one NEWLINE-joined string, one item per line — NOT
-    json.dumps(value). filegen.py's docx/xlsx/pptx writers all split a
-    section's body on "\n" to lay out one paragraph/row/bullet per line;
-    json.dumps produces a single-line JSON-array-literal string instead
-    (observed live: an Excel cell literally containing the text
-    '["1", "\\n2", "\\n3", ...]' instead of one number per row) — valid as
+    A value that isn't already a plain string (e.g. a list of numbers
+    straight out of a JSON-decoded execute_code result — see
+    _build_content_from_verified_data) becomes one NEWLINE-joined string,
+    one item per line — NOT json.dumps(value). filegen.py's docx/xlsx/pptx
+    writers all split a section's body on "\n" to lay out one paragraph/
+    row/bullet per line; json.dumps would produce a single-line JSON-
+    array-literal string instead (an Excel cell literally containing the
+    text '["1", "2", "3", ...]' instead of one number per row) — valid as
     a string, but not remotely what "formatted" means for a spreadsheet.
-    Each item is also stripped, since a list item can itself carry a stray
-    leading/trailing newline from the model's own output.
+    Each item is also stripped, since a list item can carry its own stray
+    leading/trailing whitespace.
     """
     if isinstance(value, list):
         return "\n".join(str(v).strip() for v in value)
@@ -557,57 +559,97 @@ def _stringify_content_value(value):
     return str(value)
 
 
-def _coerce_file_content_types(obj: dict) -> dict:
+def _parse_markdown_content(text: str) -> Optional[dict]:
     """
-    A small model sometimes gets the SHAPE right (title/sections/heading/
-    body all present) but not every value's TYPE — e.g. a `body` given as a
-    JSON array of numbers instead of a string. Coercing those to strings
-    (rather than rejecting the whole response and falling back to the raw,
-    unformatted prompt as file content) salvages an otherwise-fine
-    response. Also strips markdown here — nothing downstream renders it
-    (see strip_markdown_emphasis), so a literal leading "#"/"**" would
-    otherwise show up as-is in the generated file.
-    """
-    if not isinstance(obj, dict):
-        return obj
-    if "title" in obj:
-        obj["title"] = strip_markdown_emphasis(_stringify_content_value(obj["title"]))
-    sections = obj.get("sections")
-    if isinstance(sections, list):
-        for s in sections:
-            if not isinstance(s, dict):
-                continue
-            for key in ("heading", "body"):
-                if key in s:
-                    s[key] = strip_markdown_emphasis(_stringify_content_value(s[key]))
-    return obj
+    Parses the TITLE: / "## Heading" plain-text format
+    _build_filegen_content_prompt now asks for, into the same
+    {"title", "sections":[{"heading","body"}]} shape the JSON schema this
+    replaced used to produce.
 
-
-def _parse_structured_content(text: str) -> Optional[dict]:
+    This is deliberately NOT a JSON parser. A markdown heading is either
+    present at the start of a line or it isn't — there is no bracket/quote
+    balancing, no escaping, no trailing-comma or duplicate-key failure
+    mode to have. Repeated live testing of the JSON-based approach this
+    replaced showed a genuinely per-call, probabilistic syntax failure
+    rate on this size/quantization of model that several rounds of
+    prompt-tightening, a repair pass, and a retry could reduce but never
+    close; markdown headings don't have that failure surface to begin
+    with, so there's structurally less for the model to get wrong.
     """
-    Best-effort extraction of a FileContent-shaped JSON object out of a Qwen
-    response, tolerating stray markdown fences, leading/trailing prose, a
-    handful of common small-model JSON mistakes (see _repair_json_like), and
-    right-shaped-but-wrong-typed values (see _coerce_file_content_types).
-    """
-    if not text:
+    if not text or not text.strip():
         return None
-    candidate = text.strip()
-    if "```" in candidate:
-        for part in candidate.split("```"):
-            part = part.strip()
-            if part.startswith("{"):
-                candidate = part
-                break
-    start, end = candidate.find("{"), candidate.rfind("}")
-    if start != -1 and end > start:
-        candidate = candidate[start:end + 1]
-    for attempt in (candidate, _repair_json_like(candidate)):
-        try:
-            return _coerce_file_content_types(json.loads(attempt))
-        except (json.JSONDecodeError, TypeError):
-            continue
-    return None
+    text = text.strip()
+    if "```" in text:
+        text = text.replace("```", "")
+
+    title = "Generated Document"
+    title_match = _TITLE_LINE_RE.search(text)
+    if title_match:
+        title = title_match.group(1).strip()
+        text = text[title_match.end():].strip()
+
+    pieces = _MARKDOWN_HEADING_RE.split(text)
+    sections = []
+    # pieces = [text-before-first-heading, heading1, body1, heading2, body2, ...]
+    if pieces and pieces[0].strip():
+        sections.append({"heading": "", "body": pieces[0].strip()})
+    for i in range(1, len(pieces), 2):
+        heading = pieces[i].strip()
+        body = pieces[i + 1].strip() if i + 1 < len(pieces) else ""
+        if heading or body:
+            sections.append({"heading": heading, "body": body})
+    if not sections and text:
+        sections = [{"heading": "", "body": text}]
+    if not sections:
+        return None
+
+    for s in sections:
+        s["heading"] = strip_markdown_emphasis(s["heading"])
+        s["body"] = strip_markdown_emphasis(s["body"])
+    return {"title": strip_markdown_emphasis(title), "sections": sections}
+
+
+def _humanize_key(key: str) -> str:
+    return key.replace("_", " ").replace("-", " ").strip().title() or "Data"
+
+
+def _build_content_from_verified_data(prompt: str, stdout: str) -> Optional[dict]:
+    """
+    Builds the FileContent structure DIRECTLY from execute_code's own
+    verified stdout, in plain code — no LLM call involved at all.
+
+    _build_filegen_code_prompt already asks Qwen's generated Python to
+    `print(json.dumps(result))`, and that JSON comes out of a REAL Python
+    interpreter, not free-form LLM text — json.dumps() is always
+    syntactically valid JSON. Asking Qwen a SECOND time to re-transcribe
+    that same already-reliable data into another hand-written JSON/text
+    response was a pure loss: it added another chance to fail (observed
+    live: hallucinated wrong numbers despite the real values already being
+    available) for data that never needed touching by a model again once
+    it was correctly computed. This is "give the data, let a tool build
+    the JSON" applied directly — skips the unreliable step instead of
+    trying to make it more reliable.
+
+    Returns None (caller falls back to the normal LLM content-prep call)
+    when stdout isn't parseable JSON, or is empty/scalar-only — not
+    every computation result is a clean list/dict worth building a whole
+    file section from without any model involvement.
+    """
+    try:
+        data = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    title = prompt.strip().splitlines()[0][:80] or "Generated Document"
+    sections = []
+    if isinstance(data, dict) and data:
+        for key, value in data.items():
+            sections.append({"heading": _humanize_key(str(key)), "body": _stringify_content_value(value)})
+    elif isinstance(data, list) and data:
+        sections.append({"heading": "Data", "body": _stringify_content_value(data)})
+    else:
+        return None
+    return {"title": title, "sections": sections}
 
 
 def _build_lora_prompt(state: TaskState, base_prompt: str) -> str:
@@ -1286,17 +1328,17 @@ def decide_next_step(state: TaskState) -> NextStep:
         if state.task_type == "document-generation" and (last.prompt_used or "").startswith(FILEGEN_CONTENT_MARKER):
             if last.model_used == LORA_ADAPTER:
                 # Adapter output is its own trained free-text approval-note
-                # format, not JSON — parse it in code (see
+                # format — parse it in code (see
                 # _approval_note_text_to_file_content) instead of trying to
-                # decode it as the generic filegen JSON schema.
+                # decode it as the generic filegen content shape.
                 content = _approval_note_text_to_file_content(str(last.observation))
             else:
-                content = _parse_structured_content(str(last.observation))
+                content = _parse_markdown_content(str(last.observation))
                 if not _is_valid_file_content(content):
                     if state.filegen_content_retries < MAX_FILEGEN_CONTENT_RETRIES:
                         state.filegen_content_retries += 1
                         print(
-                            f"[PLANNER] task_id={state.task_id} filegen content-prep returned invalid JSON "
+                            f"[PLANNER] task_id={state.task_id} filegen content-prep returned unparseable content "
                             f"-> retrying ({state.filegen_content_retries}/{MAX_FILEGEN_CONTENT_RETRIES})"
                         )
                         return NextStep(
@@ -1308,7 +1350,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                             temperature=FILEGEN_STRUCTURED_TEMPERATURE,
                         )
                     print(
-                        f"[PLANNER] task_id={state.task_id} filegen content-prep returned invalid JSON "
+                        f"[PLANNER] task_id={state.task_id} filegen content-prep returned unparseable content "
                         f"after {state.filegen_content_retries} retry(ies) -> falling back to raw-prompt content"
                     )
                     content = _build_generate_file_args(state.prompt, state=state)["content"]
@@ -1335,6 +1377,33 @@ def decide_next_step(state: TaskState) -> NextStep:
             if state.task_type == "document-generation":
                 stdout = (last.observation or {}).get("stdout", "")
                 filegen_model = _filegen_model(state.prompt)
+
+                # Skip the LLM content-prep call entirely when the verified
+                # stdout already IS clean, structured data — building the
+                # file content from it directly in code is strictly more
+                # reliable than asking Qwen to re-transcribe the same
+                # already-correct numbers into another response (see
+                # _build_content_from_verified_data's docstring). Not
+                # attempted for the approval-note LoRA path, which needs
+                # its own trained narrative style, not a raw data dump.
+                if filegen_model != LORA_ADAPTER:
+                    scoped_prompt, _ = _scoped_deliverable_prompt(state)
+                    deterministic_content = _build_content_from_verified_data(scoped_prompt, stdout)
+                    if deterministic_content is not None:
+                        state.prepared_file_content = deterministic_content
+                        print(
+                            f"[PLANNER] task_id={state.task_id} filegen content built directly from "
+                            f"verified execute_code data (no extra model call) "
+                            f"(title={deterministic_content.get('title')!r}, "
+                            f"sections={len(deterministic_content.get('sections', []))}) "
+                            f"-> call_tool(generate_file) file_type={state.file_type}"
+                        )
+                        return NextStep(
+                            action="call_tool",
+                            tool_name="generate_file",
+                            tool_args={"file_type": state.file_type, "content": deterministic_content},
+                        )
+
                 print(
                     f"[PLANNER] task_id={state.task_id} filegen verification code executed "
                     f"-> chaining to call_qwen model={filegen_model} "
