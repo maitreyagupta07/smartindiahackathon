@@ -144,29 +144,6 @@ input, select { font-family: inherit; }
 .icon-btn:hover { background: var(--hover-surface); color: var(--text-primary); }
 .topbar-right { display: flex; align-items: center; gap: 6px; }
 
-/* ---- Decorative Tom & Jerry chase (ornamental only; see jerry.js) ---- */
-.toon-sprite {
-  position: absolute; top: 0; left: 0; width: 42px; height: 42px;
-  z-index: 2; pointer-events: none; opacity: 1;
-  transform: translate(-160px, 0);
-  will-change: transform;
-}
-.toon-sprite.toon-tom { width: 54px; height: 54px; z-index: 1; }
-.toon-sprite .toon-inner { width: 100%; height: 100%; will-change: transform; }
-.toon-sprite svg { display: block; width: 100%; height: 100%; overflow: visible; }
-/* legs/arms swing while running; jerry-inner keeps the old name for compat */
-.toon-sprite .leg-front { animation: toon-run-front .28s linear infinite; transform-origin: 32px 46px; }
-.toon-sprite .leg-back  { animation: toon-run-back  .28s linear infinite; transform-origin: 32px 46px; }
-.toon-sprite .arm       { animation: toon-run-back  .28s linear infinite; transform-origin: 30px 26px; }
-.toon-sprite.toon-tom .leg-front { animation-duration: .22s; }
-.toon-sprite.toon-tom .leg-back  { animation-duration: .22s; }
-@keyframes toon-run-front { 0%,100% { transform: rotate(24deg); } 50% { transform: rotate(-30deg); } }
-@keyframes toon-run-back  { 0%,100% { transform: rotate(-28deg); } 50% { transform: rotate(26deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .toon-sprite { opacity: .9; }
-  .toon-sprite .leg-front, .toon-sprite .leg-back, .toon-sprite .arm { animation: none; }
-}
-
 /* ---- Conversation ---- */
 .conversation-scroll { flex: 1; overflow-y: auto; padding: 32px 24px 160px; position: relative; z-index: 5; }
 .conversation-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
