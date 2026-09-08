@@ -295,4 +295,36 @@ function initSidebarToggle() {
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 }
 
-document.addEventListener('DOMContentLoaded', () => { Theme.init(); initSidebarToggle(); });
+/**
+ * Keeps --composer-dock-h (read by .conversation-scroll's bottom padding
+ * in styles.css) equal to the docked composer's REAL measured height.
+ *
+ * The dock is position:absolute over the bottom of the conversation, and
+ * its content stacks a variable number of rows (template chip bar, file
+ * preview, composer bar, "AI can make mistakes" disclaimer) — any fixed
+ * padding-bottom guess drifts out of date the moment a row is added or
+ * removed, and the conversation's last message(s) render underneath the
+ * dock instead of above it (see the "technical findings / summary
+ * templates overlap the chat" bug this was written to fix). A
+ * ResizeObserver on the dock itself is the only way this stays correct
+ * automatically as its content changes, rather than needing every future
+ * change to the dock's contents to remember to also bump a CSS number.
+ * No-ops entirely on pages without a composer-dock (e.g. admin.html),
+ * since this file is shared between index.html and admin.html.
+ */
+function initComposerDockSync() {
+  const dock = document.getElementById('composer-dock');
+  if (!dock) return;
+  const root = document.documentElement;
+  const sync = () => root.style.setProperty('--composer-dock-h', `${dock.getBoundingClientRect().height}px`);
+  sync();
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(sync).observe(dock);
+  } else {
+    // Old-browser fallback — not pixel-perfect on every content change,
+    // but keeps it roughly right instead of frozen at page-load height.
+    window.addEventListener('resize', sync);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => { Theme.init(); initSidebarToggle(); initComposerDockSync(); });
