@@ -11,3 +11,6 @@ __pycache__/
 
 # run.sh service logs
 .run-logs/
+
+# Persistent per-operator global Knowledge Base — original uploaded bytes
+kb_store/

@@ -120,6 +120,61 @@ const Api = {
     return res.json(); // { documents: [...] }
   },
 
+  /* ---- Persistent per-operator global Knowledge Base (sidebar manager) ---- */
+
+  /** Every document in this operator's global KB. In scope for every chat. */
+  async kbList(userId) {
+    const res = await fetch(`${API_BASE}/api/kb/list?user_id=${encodeURIComponent(userId)}`);
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `kb list failed (${res.status})`);
+    return body; // { documents: [...] }
+  },
+
+  /** Add a file to the global KB. Stays in scope for every chat until removed. */
+  async kbUpload({ user_id, file_base64, file_name, file_mime_type = null }) {
+    const res = await fetch(`${API_BASE}/api/kb/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id, file_base64, file_name, file_mime_type }),
+    });
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `kb upload failed (${res.status})`);
+    return body;
+  },
+
+  async kbDelete(userId, documentId) {
+    const res = await fetch(
+      `${API_BASE}/api/kb/${encodeURIComponent(documentId)}?user_id=${encodeURIComponent(userId)}`,
+      { method: 'DELETE' },
+    );
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `kb delete failed (${res.status})`);
+    return body;
+  },
+
+  /** Server-rendered inline preview payload for one KB document. */
+  async kbPreview(userId, documentId) {
+    const res = await fetch(
+      `${API_BASE}/api/kb/${encodeURIComponent(documentId)}/preview?user_id=${encodeURIComponent(userId)}`,
+    );
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `kb preview failed (${res.status})`);
+    return body;
+  },
+
+  kbRawUrl(userId, documentId) {
+    return `${API_BASE}/api/kb/${encodeURIComponent(documentId)}/raw?user_id=${encodeURIComponent(userId)}`;
+  },
+
+  /** Server-rendered inline preview payload for a generated deliverable in /files/. */
+  async previewGenerated(fileNameOrUrl) {
+    const name = String(fileNameOrUrl).split('/').pop().split('?')[0];
+    const res = await fetch(`${API_BASE}/api/preview/generated/${encodeURIComponent(name)}`);
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `preview failed (${res.status})`);
+    return body;
+  },
+
   /** Probe the real backend once, briefly, so the UI can honestly signal live-vs-demo mode. */
   async probe(timeoutMs = 1500) {
     try {

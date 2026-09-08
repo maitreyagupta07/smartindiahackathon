@@ -9,8 +9,14 @@ Ollama, or the Tools service directly.
 
 ## Files
 
-- `index.html` / `user.js` — the User workbench: task sidebar (history +
-  files/deliverables), a one-click task-template bar above the composer (plus
+- `index.html` / `user.js` — the User workbench: task sidebar (chat history,
+  a persistent per-operator **Knowledge Base** manager — add / remove /
+  search files that stay in retrieval scope for every chat — and
+  files/deliverables), an in-page **document preview panel** that slides in
+  from the right when a generated Word/Excel/PowerPoint/PDF deliverable or a
+  Knowledge Base file is clicked (PDFs embed directly; Office formats are
+  rendered to HTML server-side, fully offline), a one-click task-template bar
+  above the composer (plus
   an expandable template library), a centered composer for new tasks that
   transitions to a docked composer once a task is active, the minimal
   live-state strip, the maximized execution graph overlay, the contextual

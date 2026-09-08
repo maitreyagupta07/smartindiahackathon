@@ -61,6 +61,15 @@ COLLECTION_NAME = "mrpl_docs"
 # a document uploaded in one chat is never retrievable from another.
 CHAT_COLLECTION_NAME = "chat_kb"
 
+# Persistent, per-operator GLOBAL Knowledge Base. A THIRD collection in the
+# SAME ChromaDB — same client, same on-disk store, same embedding function.
+# Every chunk carries a `user_id` in its metadata and every query is
+# filtered by it, so one operator's KB is never retrievable by another.
+# Unlike CHAT_COLLECTION_NAME, a document here is in retrieval scope for
+# EVERY chat that operator opens (merged with that chat's own uploads by
+# `search_all`), and it survives until the operator explicitly removes it.
+GLOBAL_COLLECTION_NAME = "global_kb"
+
 # Every directory that may contain searchable source documents. FILES_DIR is
 # intentionally included: it's the same directory Person C's own
 # generate_file writes to and Person B serves at /files/, so anything a user
@@ -95,6 +104,7 @@ _TEXT_EXTRACTORS = {
 _client = None
 _collection = None
 _chat_collection = None
+_global_collection = None
 
 
 def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100):
@@ -577,3 +587,252 @@ def list_chat_documents(chat_id: Optional[str] = None) -> list[dict]:
         key=lambda d: (d.get("uploaded_at") or ""),
         reverse=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Persistent per-operator global Knowledge Base (the `global_kb` collection)
+# ---------------------------------------------------------------------------
+
+def get_global_collection():
+    global _global_collection
+    if _global_collection is None:
+        _global_collection = _get_client().get_or_create_collection(
+            name=GLOBAL_COLLECTION_NAME, embedding_function=_EMBEDDING_FUNCTION
+        )
+        print(
+            f"[docsearch] global KB collection {GLOBAL_COLLECTION_NAME!r} loaded, "
+            f"{_global_collection.count()} chunk(s) already persisted on disk"
+        )
+    return _global_collection
+
+
+def ingest_global_document(
+    user_id: str,
+    filename: str,
+    pages: List[Tuple[int, str]],
+    document_id: Optional[str] = None,
+    uploaded_at: Optional[str] = None,
+) -> dict:
+    """
+    Chunk + embed + persist an uploaded document into the global_kb
+    collection, every chunk tagged with the owning `user_id` (mandatory
+    isolation key), document_id, filename and page number.
+
+    Mirrors ingest_chat_document exactly, except the isolation key is
+    `user_id` instead of `chat_id` — so the same _chunk_text, the same
+    per-page chunking, and the same "re-uploading the same filename
+    replaces its prior chunks" behavior all apply.
+
+    Returns { document_id, filename, user_id, chunks, status, uploaded_at }.
+    Raises ValueError if no non-empty text chunks could be produced.
+    """
+    if not user_id or not user_id.strip():
+        raise ValueError("user_id is required for global KB ingestion")
+    user_id = user_id.strip()
+    document_id = document_id or str(uuid.uuid4())
+    uploaded_at = uploaded_at or _now_iso()
+
+    collection = get_global_collection()
+
+    try:
+        collection.delete(where={"$and": [{"user_id": user_id}, {"filename": filename}]})
+    except Exception as e:  # noqa: BLE001
+        print(f"[docsearch] global KB: could not clear prior chunks for {filename!r} ({user_id}): {e}")
+
+    ids: list[str] = []
+    docs: list[str] = []
+    metas: list[dict] = []
+    chunk_index = 0
+    for page_number, page_text in pages:
+        for chunk in _chunk_text(page_text):
+            meta = {
+                "user_id": user_id,
+                "document_id": document_id,
+                "filename": filename,
+                "source": filename,
+                "chunk_index": chunk_index,
+                "uploaded_at": uploaded_at,
+            }
+            if page_number is not None:
+                meta["page"] = int(page_number)
+            ids.append(f"{user_id}::{document_id}::{chunk_index}")
+            docs.append(chunk)
+            metas.append(meta)
+            chunk_index += 1
+
+    if not ids:
+        raise ValueError("no extractable text content in document")
+
+    print(
+        f"[docsearch] global KB: adding {len(ids)} chunk(s) for document {filename!r} "
+        f"(document_id={document_id}) for user {user_id}"
+    )
+    collection.add(ids=ids, documents=docs, metadatas=metas)
+    return {
+        "document_id": document_id,
+        "filename": filename,
+        "user_id": user_id,
+        "chunks": len(ids),
+        "status": "indexed",
+        "uploaded_at": uploaded_at,
+    }
+
+
+def search_global_kb(query: str, user_id: str, top_k: int = 4) -> list[dict]:
+    """
+    Vector search restricted to ONE operator's global Knowledge Base.
+    The `where={"user_id": user_id}` filter is mandatory — a document in
+    another operator's KB can never be returned here.
+    """
+    if not user_id or not user_id.strip():
+        return []
+    user_id = user_id.strip()
+    collection = get_global_collection()
+    try:
+        count = collection.count()
+    except Exception:  # noqa: BLE001
+        count = 0
+    if count == 0:
+        return []
+
+    top_k = max(1, min(top_k, count))
+    fetch_k = min(count, max(top_k * 3, top_k + 4))
+    result = collection.query(
+        query_texts=[query],
+        n_results=fetch_k,
+        where={"user_id": user_id},
+    )
+
+    wanted_ids = _identifier_tokens(query)
+    scored = []
+    docs = result.get("documents", [[]])[0]
+    metas = result.get("metadatas", [[]])[0]
+    dists = result.get("distances", [[]])[0]
+    for text, meta, dist in zip(docs, metas, dists):
+        meta = meta or {}
+        score = 1.0 / (1.0 + dist) if dist is not None else 0.0
+        lexical_bonus = 0.0
+        if wanted_ids:
+            lowered = (text or "").lower()
+            hits = sum(1 for tok in wanted_ids if tok in lowered)
+            if hits:
+                lexical_bonus = 0.5 + 0.1 * hits
+        scored.append((score + lexical_bonus, round(float(score), 4), text, meta))
+
+    scored.sort(key=lambda r: r[0], reverse=True)
+    out = []
+    for _rank_score, score, text, meta in scored[:top_k]:
+        out.append({
+            "text": text,
+            "source": meta.get("filename") or meta.get("source", "unknown"),
+            "page": meta.get("page"),
+            "document_id": meta.get("document_id"),
+            "score": score,
+            "origin": "global-kb",
+        })
+    return out
+
+
+def search_all(
+    query: str,
+    top_k: int = 4,
+    chat_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> list[dict]:
+    """
+    Unified retrieval for the chat flow: this chat's own uploaded documents
+    (chat_id-scoped) PLUS the operator's persistent global Knowledge Base
+    (user_id-scoped), merged and re-ranked together by score, de-duplicated,
+    and truncated to `top_k`.
+
+    Each source is queried for up to `top_k` of its own candidates first, so
+    a strong hit in either store still surfaces even when the other store is
+    large. The corpus in docs_corpus/ is intentionally NOT included here —
+    that stays reachable through the explicit doc-search route.
+    """
+    merged: list[dict] = []
+    if chat_id and chat_id.strip():
+        merged.extend(search_chat_docs(query, chat_id, top_k))
+    if user_id and user_id.strip():
+        merged.extend(search_global_kb(query, user_id, top_k))
+
+    if not merged:
+        return []
+
+    # De-dupe on (source, page, text-prefix) so the same passage indexed in
+    # both stores doesn't take two of the top_k slots.
+    seen: set = set()
+    deduped: list[dict] = []
+    for r in sorted(merged, key=lambda x: x.get("score") or 0.0, reverse=True):
+        key = (r.get("source"), r.get("page"), (r.get("text") or "")[:80])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(r)
+    return deduped[:top_k]
+
+
+def list_global_documents(user_id: str) -> list[dict]:
+    """
+    Aggregates the global_kb collection's chunk metadata into a per-document
+    listing for one operator's KB manager. Mirrors list_chat_documents.
+    """
+    if not user_id or not user_id.strip():
+        return []
+    user_id = user_id.strip()
+    collection = get_global_collection()
+    try:
+        got = collection.get(where={"user_id": user_id}, include=["metadatas"])
+    except Exception as e:  # noqa: BLE001
+        print(f"[docsearch] global KB: list_global_documents failed: {e}")
+        return []
+
+    by_doc: dict[str, dict] = {}
+    for meta in got.get("metadatas") or []:
+        if not meta:
+            continue
+        document_id = meta.get("document_id") or meta.get("filename")
+        entry = by_doc.get(document_id)
+        filename = meta.get("filename") or meta.get("source") or "unknown"
+        ext = Path(filename).suffix.lower().lstrip(".") or "txt"
+        if entry is None:
+            by_doc[document_id] = {
+                "document_id": document_id,
+                "filename": filename,
+                "file_type": ext,
+                "uploaded_at": meta.get("uploaded_at"),
+                "chunks": 1,
+                "status": "indexed",
+            }
+        else:
+            entry["chunks"] += 1
+
+    return sorted(
+        by_doc.values(),
+        key=lambda d: (d.get("uploaded_at") or ""),
+        reverse=True,
+    )
+
+
+def delete_global_document(user_id: str, document_id: str) -> int:
+    """
+    Removes every chunk of one document from one operator's global KB.
+    Returns the number of chunks that were present before deletion (0 if the
+    document_id didn't match anything for this user).
+    """
+    if not (user_id and user_id.strip() and document_id and document_id.strip()):
+        return 0
+    user_id = user_id.strip()
+    document_id = document_id.strip()
+    collection = get_global_collection()
+    where = {"$and": [{"user_id": user_id}, {"document_id": document_id}]}
+    try:
+        existing = collection.get(where=where, include=[])
+        n = len(existing.get("ids") or [])
+    except Exception:  # noqa: BLE001
+        n = 0
+    try:
+        collection.delete(where=where)
+    except Exception as e:  # noqa: BLE001
+        print(f"[docsearch] global KB: delete failed for {document_id!r} ({user_id}): {e}")
+    return n

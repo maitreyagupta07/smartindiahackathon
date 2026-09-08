@@ -78,6 +78,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
         file_mime_type=req.file_mime_type,
         chat_id=getattr(req, "chat_id", None),
         history=getattr(req, "history", None),
+        user_id=getattr(req, "user_id", None),
     )
 
     print(

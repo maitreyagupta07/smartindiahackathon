@@ -99,7 +99,7 @@ async def test_chat_isolation_each_chat_only_sees_its_own_chat_id():
     uploaded in Chat A can never come back for Chat B."""
     captured = []
 
-    async def fake_search(query, top_k=3, chat_id=None):
+    async def fake_search(query, top_k=3, chat_id=None, user_id=None):
         captured.append(chat_id)
         payloads = {
             "chatA": {"results": [{"text": "A-only content", "source": "A.pdf", "page": 2, "score": 0.9}]},

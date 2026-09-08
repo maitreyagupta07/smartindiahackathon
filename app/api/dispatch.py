@@ -93,6 +93,7 @@ async def dispatch_to_agent(
                 file_mime_type=file_mime_type,
                 chat_id=chat_id,
                 history=history,
+                user_id=user_id,
             )
             resp = await run_agent_loop(req)
             data = resp.model_dump()

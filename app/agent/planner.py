@@ -1180,20 +1180,27 @@ def decide_next_step(state: TaskState) -> NextStep:
             )
 
         if state.task_type == "chat":
-            # Chat flow: retrieve from THIS chat's Knowledge Base only
-            # (chat_id filter enforced by the tools service), then answer
-            # with the retrieved chunks + recent conversation context.
+            # Chat flow: retrieve from THIS chat's own uploads AND the
+            # operator's persistent global Knowledge Base (both isolation
+            # filters enforced in docsearch.search_all), then answer with
+            # the retrieved chunks + recent conversation context.
             chat_top_k = 8 if (
                 _looks_like_comparison(state.prompt) or _looks_like_transcript(state.prompt)
-            ) else 4
+            ) else 5
             print(
                 f"[PLANNER] task_id={state.task_id} step0 -> call_tool(search_docs) "
-                f"chat_id={state.chat_id!r} top_k={chat_top_k} (chat-scoped KB retrieval)"
+                f"chat_id={state.chat_id!r} user_id={state.user_id!r} top_k={chat_top_k} "
+                f"(chat uploads + operator global KB retrieval)"
             )
             return NextStep(
                 action="call_tool",
                 tool_name="search_docs",
-                tool_args={"query": state.prompt, "top_k": chat_top_k, "chat_id": state.chat_id},
+                tool_args={
+                    "query": state.prompt,
+                    "top_k": chat_top_k,
+                    "chat_id": state.chat_id,
+                    "user_id": state.user_id,
+                },
             )
 
         if state.task_type == "document-generation":
@@ -1501,7 +1508,11 @@ def _rebuild_tool_args(state: TaskState, failed_step) -> dict:
     if failed_step.tool_name == "execute_code":
         return {"code": _extract_code(state.prompt), "language": "python"}
     if failed_step.tool_name == "search_docs":
-        return {"query": state.prompt, "top_k": 3}
+        args = {"query": state.prompt, "top_k": 3}
+        if state.task_type == "chat":
+            args["chat_id"] = state.chat_id
+            args["user_id"] = state.user_id
+        return args
     if failed_step.tool_name == "generate_file":
         return _build_generate_file_args(state.prompt, state=state)
     return {}

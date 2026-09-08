@@ -19,6 +19,11 @@ class ExecuteTaskRequest(BaseModel):
     # references like "it"/"they" against what was said earlier.
     chat_id: Optional[str] = None
     history: Optional[list[dict]] = None
+    # Optional, additive. Identifies the operator so the chat flow can also
+    # retrieve from that operator's persistent global Knowledge Base
+    # (app/api/knowledge.py) alongside this chat's own uploads. None keeps
+    # every existing caller/shape identical.
+    user_id: Optional[str] = None
 
 
 class TaskResult(BaseModel):

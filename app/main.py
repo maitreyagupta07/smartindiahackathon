@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from .api.errors import install_error_handlers
 from .api.tasks import router as tasks_router
 from .api.chat import router as chat_router
+from .api.knowledge import router as knowledge_router
 from .audit.log import init_db
 from .storage.config import FILES_DIR, REPO_ROOT
 
@@ -46,6 +47,7 @@ app.add_middleware(
 
 app.include_router(tasks_router)
 app.include_router(chat_router)
+app.include_router(knowledge_router)
 
 init_db()
 

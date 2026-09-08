@@ -220,6 +220,7 @@ function renderConversation() {
   inner.innerHTML = chatMessages.map(renderTurn).join('');
   wireCopyButtons();
   wireSpeakButtons();
+  wirePreviewButtons();
   startWorkingTicker();
   const scroller = document.getElementById('conversation-scroll');
   if (scroller) scroller.scrollTop = scroller.scrollHeight;
@@ -299,6 +300,7 @@ function renderTurn(turn) {
             </div>
           </div>
           <div class="actions">
+            ${f.file_url ? `<button class="btn-ghost preview-file-btn" data-preview-url="${escapeHtml(f.file_url)}" data-preview-name="${escapeHtml(fn)}">Preview</button>` : ''}
             <a class="btn-ghost" href="${url}" target="_blank" rel="noopener">Open</a>
             <a class="btn-icon-accent" href="${url}" download><iconify-icon icon="lucide:download" style="font-size:16px"></iconify-icon></a>
           </div>
@@ -409,14 +411,27 @@ function renderTaskSidebar() {
   const filesListEl = document.getElementById('files-sidebar-list');
   const filesEmptyEl = document.getElementById('files-sidebar-empty');
   filesEmptyEl.hidden = files.length > 0;
-  filesListEl.innerHTML = files.map((f) => `
-    <a href="${f.url || '#'}" class="task-sidebar-item" ${f.url ? 'target="_blank" rel="noopener"' : 'onclick="return false"'}>
-      <iconify-icon icon="${f.kb ? 'lucide:book-marked' : fileTypeIcon(f.name)}" class="task-sidebar-item-icon"></iconify-icon>
-      <div class="task-sidebar-item-body">
-        <div class="task-sidebar-item-title mono">${escapeHtml(truncate(f.name, 24))}</div>
-      </div>
-    </a>
-  `).join('');
+  filesListEl.innerHTML = files.map((f) => {
+    // Generated deliverables open the in-page preview panel; chat-scoped KB
+    // upload chips just mark that a file is attached to this chat.
+    if (!f.kb && f.url && f.url !== '#') {
+      return `
+        <button class="task-sidebar-item preview-file-btn" data-preview-url="${escapeHtml(f.url)}" data-preview-name="${escapeHtml(f.name)}">
+          <iconify-icon icon="${fileTypeIcon(f.name)}" class="task-sidebar-item-icon"></iconify-icon>
+          <div class="task-sidebar-item-body">
+            <div class="task-sidebar-item-title mono">${escapeHtml(truncate(f.name, 24))}</div>
+          </div>
+        </button>`;
+    }
+    return `
+      <div class="task-sidebar-item" style="cursor:default">
+        <iconify-icon icon="${f.kb ? 'lucide:book-marked' : fileTypeIcon(f.name)}" class="task-sidebar-item-icon"></iconify-icon>
+        <div class="task-sidebar-item-body">
+          <div class="task-sidebar-item-title mono">${escapeHtml(truncate(f.name, 24))}</div>
+        </div>
+      </div>`;
+  }).join('');
+  wirePreviewButtons();
 }
 
 function chatSidebarItemHtml(c) {
@@ -1714,6 +1729,298 @@ const TemplateLibrary = {
   },
 };
 
+/* ============================================================
+   Right-side document preview panel — opens in-page (like
+   Claude's preview) when a generated deliverable or a Knowledge
+   Base file is clicked. PDFs embed the file directly; Word /
+   Excel / PowerPoint / text are rendered to HTML server-side
+   (fully offline) by /api/preview/* and shown here.
+   ============================================================ */
+function absUrl(u) {
+  if (!u) return '';
+  if (/^https?:/i.test(u)) return u;
+  if (u.startsWith('/')) return (typeof API_BASE === 'string' ? API_BASE : '') + u;
+  return u;
+}
+
+const PreviewPanel = {
+  currentKey: null,
+
+  els() {
+    return {
+      panel: document.getElementById('preview-panel'),
+      backdrop: document.getElementById('preview-backdrop'),
+      body: document.getElementById('preview-panel-body'),
+      name: document.getElementById('preview-panel-name'),
+      icon: document.getElementById('preview-panel-icon'),
+      openTab: document.getElementById('preview-open-tab'),
+      download: document.getElementById('preview-download'),
+      closeBtn: document.getElementById('preview-close'),
+    };
+  },
+
+  init() {
+    const { backdrop, closeBtn } = this.els();
+    if (closeBtn) closeBtn.addEventListener('click', () => this.close());
+    if (backdrop) backdrop.addEventListener('click', () => this.close());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.isOpen()) { e.stopPropagation(); this.close(); }
+    });
+  },
+
+  isOpen() {
+    const { panel } = this.els();
+    return !!panel && !panel.hidden;
+  },
+
+  _show(name) {
+    const { panel, backdrop, icon, name: nameEl } = this.els();
+    if (!panel) return;
+    panel.hidden = false;
+    backdrop.hidden = false;
+    void panel.offsetWidth; // force reflow so the slide-in transition runs
+    panel.classList.add('open');
+    backdrop.classList.add('open');
+    document.body.classList.add('preview-open');
+    if (nameEl) nameEl.textContent = name || 'Preview';
+    if (icon) icon.setAttribute('icon', fileTypeIcon(name || ''));
+  },
+
+  close() {
+    const { panel, backdrop, body } = this.els();
+    this.currentKey = null;
+    if (panel) panel.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('open');
+    document.body.classList.remove('preview-open');
+    setTimeout(() => {
+      if (panel && !panel.classList.contains('open')) panel.hidden = true;
+      if (backdrop && !backdrop.classList.contains('open')) backdrop.hidden = true;
+      if (body && !PreviewPanel.currentKey) body.innerHTML = '';
+    }, 220);
+  },
+
+  _loading() {
+    const { body } = this.els();
+    if (body) body.innerHTML = `<div class="preview-state"><span class="spark"></span>Loading preview…</div>`;
+  },
+
+  _error(msg) {
+    const { body } = this.els();
+    if (body) body.innerHTML = `<div class="preview-state err"><iconify-icon icon="lucide:alert-triangle"></iconify-icon><span>${escapeHtml(msg)}</span></div>`;
+  },
+
+  _setActions(rawUrl) {
+    const { openTab, download } = this.els();
+    const abs = absUrl(rawUrl);
+    if (openTab) { openTab.href = abs || '#'; openTab.classList.toggle('hidden', !abs); }
+    if (download) { download.href = abs || '#'; download.classList.toggle('hidden', !abs); }
+  },
+
+  _renderPayload(payload) {
+    const { body } = this.els();
+    if (!body) return;
+    this._setActions(payload.raw_url);
+    const raw = absUrl(payload.raw_url);
+    if (payload.mode === 'pdf' && raw) {
+      body.innerHTML = `<iframe class="preview-frame" src="${escapeHtml(raw)}" title="Document preview"></iframe>`;
+    } else if (payload.mode === 'html') {
+      body.innerHTML = `<div class="preview-doc">${payload.html || ''}</div>`;
+    } else if (payload.mode === 'text') {
+      body.innerHTML = `<pre class="preview-text">${escapeHtml(payload.text || '')}</pre>`;
+    } else if (payload.mode === 'error') {
+      this._error(payload.message || 'Could not render a preview of this file.');
+    } else {
+      body.innerHTML = `<div class="preview-state">No inline preview for this file type.${raw ? ` <a href="${escapeHtml(raw)}" download>Download it</a> instead.` : ''}</div>`;
+    }
+  },
+
+  async openKb(doc) {
+    const key = 'kb:' + doc.document_id;
+    this.currentKey = key;
+    this._show(doc.filename);
+    if (doc.pending) { this._error('This file is still being indexed — try again in a moment.'); return; }
+    if (!LIVE_BACKEND) { this._error('Backend not detected — preview is unavailable.'); return; }
+    this._loading();
+    try {
+      const payload = await Api.kbPreview(Store.USER_ID, doc.document_id);
+      if (this.currentKey !== key) return; // switched away while loading
+      this._renderPayload(payload);
+    } catch (err) {
+      if (this.currentKey === key) this._error(err.message);
+    }
+  },
+
+  async openGenerated(fileUrl, fileName) {
+    const name = fileName || String(fileUrl).split('/').pop();
+    const key = 'gen:' + fileUrl;
+    this.currentKey = key;
+    this._show(name);
+    if (/\.pdf($|\?)/i.test(name) || /\.pdf($|\?)/i.test(fileUrl)) {
+      this._renderPayload({ mode: 'pdf', raw_url: fileUrl });
+      return;
+    }
+    if (!LIVE_BACKEND) { this._error('Backend not detected — preview is unavailable.'); return; }
+    this._loading();
+    try {
+      const payload = await Api.previewGenerated(fileUrl);
+      if (this.currentKey !== key) return;
+      this._renderPayload(payload);
+    } catch (err) {
+      if (this.currentKey === key) this._error(err.message);
+    }
+  },
+};
+
+/** Wire every "Preview" control currently in the DOM (deliverable cards,
+ *  the Files & Deliverables sidebar list). Idempotent. */
+function wirePreviewButtons() {
+  document.querySelectorAll('.preview-file-btn').forEach((btn) => {
+    if (btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      PreviewPanel.openGenerated(btn.dataset.previewUrl, btn.dataset.previewName);
+    });
+  });
+}
+
+/* ============================================================
+   Knowledge Base — the persistent, per-operator file store in
+   the sidebar. Files added here stay in retrieval scope for
+   EVERY chat (merged with each chat's own uploads server-side)
+   until removed. Add / remove / search all live here.
+   ============================================================ */
+const KB_ADD_EXTS = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.txt', '.md'];
+
+const KnowledgeBase = {
+  docs: [],
+  q: '',
+
+  els() {
+    return {
+      list: document.getElementById('kb-sidebar-list'),
+      empty: document.getElementById('kb-sidebar-empty'),
+      search: document.getElementById('kb-search'),
+      addBtn: document.getElementById('kb-add-btn'),
+      fileInput: document.getElementById('kb-file-input'),
+    };
+  },
+
+  init() {
+    const { search, addBtn, fileInput } = this.els();
+    if (addBtn && fileInput) {
+      addBtn.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', () => {
+        const files = Array.from(fileInput.files || []);
+        fileInput.value = '';
+        files.forEach((f) => this.add(f));
+      });
+    }
+    if (search) {
+      search.addEventListener('input', () => { this.q = search.value.trim().toLowerCase(); this.render(); });
+    }
+    this.render();
+  },
+
+  async refresh() {
+    if (!LIVE_BACKEND) { this.render(); return; }
+    try {
+      const data = await Api.kbList(Store.USER_ID);
+      this.docs = data.documents || [];
+    } catch (err) {
+      toast(`Couldn't load the Knowledge Base: ${err.message}`, true);
+    }
+    this.render();
+  },
+
+  filtered() {
+    if (!this.q) return this.docs;
+    return this.docs.filter((d) => (d.filename || '').toLowerCase().includes(this.q));
+  },
+
+  render() {
+    const { list, empty } = this.els();
+    if (!list || !empty) return;
+    const rows = this.filtered();
+    if (!rows.length) {
+      list.innerHTML = '';
+      empty.hidden = false;
+      const span = empty.querySelector('span');
+      if (span) {
+        span.textContent = this.q
+          ? 'No files match your search'
+          : (LIVE_BACKEND ? 'Add files here — every chat can use them' : 'Connect the backend to use the Knowledge Base');
+      }
+      return;
+    }
+    empty.hidden = true;
+    list.innerHTML = rows.map((d) => `
+      <div class="kb-item${d.pending ? ' pending' : ''}" title="${escapeHtml(d.filename)}">
+        <button class="kb-item-open" data-kb-open="${escapeHtml(d.document_id)}"${d.pending ? ' disabled' : ''}>
+          <iconify-icon icon="${d.pending ? 'lucide:loader' : fileTypeIcon(d.filename)}" class="task-sidebar-item-icon"></iconify-icon>
+          <span class="kb-item-name mono">${escapeHtml(truncate(d.filename, 20))}</span>
+          ${d.pending ? '<span class="kb-item-chunks">…</span>' : (d.chunks ? `<span class="kb-item-chunks" title="${d.chunks} indexed chunk(s)">${d.chunks}</span>` : '')}
+        </button>
+        <button class="kb-item-remove" data-kb-remove="${escapeHtml(d.document_id)}" title="Remove from Knowledge Base"${d.pending ? ' disabled' : ''}>
+          <iconify-icon icon="lucide:x"></iconify-icon>
+        </button>
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-kb-open]').forEach((el) => {
+      el.addEventListener('click', () => {
+        const doc = this.docs.find((x) => x.document_id === el.dataset.kbOpen);
+        if (doc) PreviewPanel.openKb(doc);
+      });
+    });
+    list.querySelectorAll('[data-kb-remove]').forEach((el) => {
+      el.addEventListener('click', (e) => { e.stopPropagation(); this.remove(el.dataset.kbRemove); });
+    });
+  },
+
+  async add(file) {
+    const name = file.name || 'file';
+    const lname = name.toLowerCase();
+    if (!KB_ADD_EXTS.some((e) => lname.endsWith(e))) {
+      toast('Knowledge Base files must be PDF, Word, PowerPoint, Excel, or text.', true);
+      return;
+    }
+    if (!LIVE_BACKEND) { toast('Backend not detected — the file was not added.', true); return; }
+
+    const tempId = 'pending-' + Math.random().toString(36).slice(2);
+    this.docs = [{ document_id: tempId, filename: name, chunks: 0, pending: true }, ...this.docs];
+    this.render();
+    try {
+      const file_base64 = await fileToBase64(file);
+      const res = await Api.kbUpload({
+        user_id: Store.USER_ID, file_base64, file_name: name, file_mime_type: file.type || null,
+      });
+      this.docs = this.docs.filter((d) => d.document_id !== tempId);
+      await this.refresh();
+      toast(`${res.filename || name} added${res.chunks ? ` · ${res.chunks} chunk${res.chunks === 1 ? '' : 's'}` : ''}.`);
+    } catch (err) {
+      this.docs = this.docs.filter((d) => d.document_id !== tempId);
+      this.render();
+      toast(`Couldn't add ${name}: ${err.message}`, true);
+    }
+  },
+
+  async remove(documentId) {
+    const doc = this.docs.find((d) => d.document_id === documentId);
+    if (!doc || doc.pending) return;
+    if (!LIVE_BACKEND) { toast('Backend not detected.', true); return; }
+    this.docs = this.docs.filter((d) => d.document_id !== documentId);
+    this.render();
+    if (PreviewPanel.currentKey === 'kb:' + documentId) PreviewPanel.close();
+    try {
+      await Api.kbDelete(Store.USER_ID, documentId);
+      toast(`${doc.filename} removed from the Knowledge Base.`);
+    } catch (err) {
+      toast(`Couldn't remove ${doc.filename}: ${err.message}`, true);
+      this.refresh();
+    }
+  },
+};
+
 /* ---------- Init ---------- */
 document.addEventListener('DOMContentLoaded', async () => {
   initComposer();
@@ -1735,6 +2042,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   GradientPicker.init();
   initNotifications();
   TemplateLibrary.init();
+  PreviewPanel.init();
+  KnowledgeBase.init();
 
   document.getElementById('maximize-activity').addEventListener('click', (e) => { e.preventDefault(); openGraph(); });
   document.getElementById('graph-close').addEventListener('click', closeGraph);
@@ -1755,4 +2064,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const badge = document.getElementById('demo-badge');
   if (badge) badge.hidden = LIVE_BACKEND;
   if (!LIVE_BACKEND) toast('Backend not detected — running in demo simulation mode.');
+
+  // Load the persistent per-operator Knowledge Base now that live-vs-demo
+  // is known (the sidebar manager already painted its empty state).
+  KnowledgeBase.refresh();
 });

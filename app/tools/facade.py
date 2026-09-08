@@ -25,6 +25,7 @@ from . import sandbox
 from . import docsearch
 from . import filegen
 from . import doc_extract
+from . import doc_preview
 from . import ocr
 
 
@@ -53,11 +54,23 @@ async def execute_code(code: str, language: str = "python") -> dict:
     return result
 
 
-async def search_docs(query: str, top_k: int = 3, chat_id: str | None = None) -> dict:
-    """Contract §2.6 shape: {"results": [{"text","source","score","page"?}, ...]}."""
-    print(f"[TOOLS] search_docs query={query!r} top_k={top_k} chat_id={chat_id!r}")
-    if chat_id:
-        results = await asyncio.to_thread(docsearch.search_chat_docs, query, chat_id, top_k)
+async def search_docs(
+    query: str,
+    top_k: int = 3,
+    chat_id: str | None = None,
+    user_id: str | None = None,
+) -> dict:
+    """Contract §2.6 shape: {"results": [{"text","source","score","page"?}, ...]}.
+
+    - Plain corpus search when neither chat_id nor user_id is given (the
+      explicit doc-search route — unchanged).
+    - Unified chat retrieval when chat_id and/or user_id is given: this
+      chat's own uploads merged with the operator's persistent global
+      Knowledge Base (docsearch.search_all).
+    """
+    print(f"[TOOLS] search_docs query={query!r} top_k={top_k} chat_id={chat_id!r} user_id={user_id!r}")
+    if chat_id or user_id:
+        results = await asyncio.to_thread(docsearch.search_all, query, top_k, chat_id, user_id)
     else:
         results = await asyncio.to_thread(docsearch.search_docs, query, top_k)
     print(f"[TOOLS] search_docs result_count={len(results)}")
@@ -136,3 +149,63 @@ async def ingest_document(
 async def list_kb_documents(chat_id: Optional[str] = None) -> list[dict]:
     """Contract-equivalent of the old GET /tools/kb-documents."""
     return await asyncio.to_thread(docsearch.list_chat_documents, chat_id)
+
+
+# --- Persistent per-operator global Knowledge Base -------------------------
+
+def _ingest_global_document_sync(
+    user_id: str,
+    filename: str,
+    file_base64: str,
+    mime_type: Optional[str],
+    document_id: Optional[str],
+    uploaded_at: Optional[str],
+) -> dict:
+    if not doc_extract.is_supported(mime_type, filename):
+        raise DocumentIngestError(
+            f"unsupported file type {mime_type or filename!r} — supported: "
+            f"{doc_extract.describe_supported()}"
+        )
+    try:
+        pages = doc_extract.extract_pages(file_base64, mime_type, filename)
+    except doc_extract.DocExtractionError as e:
+        raise DocumentIngestError(f"could not read document: {e}")
+    if not pages:
+        raise DocumentIngestError(
+            "no extractable text found in the document (it may be empty, or a scan with no OCR available)"
+        )
+    return docsearch.ingest_global_document(
+        user_id=user_id, filename=filename, pages=pages,
+        document_id=document_id, uploaded_at=uploaded_at,
+    )
+
+
+async def ingest_global_document(
+    user_id: str,
+    filename: str,
+    file_base64: str,
+    mime_type: Optional[str] = None,
+    document_id: Optional[str] = None,
+    uploaded_at: Optional[str] = None,
+) -> dict:
+    """Ingest one file into the operator's persistent global KB. Returns
+    {"document_id","filename","user_id","chunks","status","uploaded_at"}.
+    Raises DocumentIngestError for a bad/empty/unsupported file."""
+    print(f"[TOOLS] ingest_global_document user_id={user_id!r} filename={filename!r}")
+    result = await asyncio.to_thread(
+        _ingest_global_document_sync, user_id, filename, file_base64, mime_type, document_id, uploaded_at,
+    )
+    print(f"[TOOLS] ingest_global_document done chunks={result.get('chunks')}")
+    return result
+
+
+async def list_global_kb_documents(user_id: str) -> list[dict]:
+    return await asyncio.to_thread(docsearch.list_global_documents, user_id)
+
+
+async def delete_global_kb_document(user_id: str, document_id: str) -> int:
+    return await asyncio.to_thread(docsearch.delete_global_document, user_id, document_id)
+
+
+async def render_file_preview(raw: bytes, filename: str, mime: Optional[str] = None) -> dict:
+    return await asyncio.to_thread(doc_preview.render_preview, raw, filename, mime)

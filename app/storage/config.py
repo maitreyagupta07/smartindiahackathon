@@ -58,6 +58,16 @@ _raw_files_dir = Path(_RAW.get("FILES_DIR", "./shared_files"))
 FILES_DIR = _raw_files_dir if _raw_files_dir.is_absolute() else (REPO_ROOT / _raw_files_dir).resolve()
 FILES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Original bytes of every file added to the persistent, per-operator global
+# Knowledge Base (app/api/knowledge.py). Kept OUTSIDE FILES_DIR on purpose:
+# FILES_DIR is scanned by docsearch's corpus auto-sync and served wholesale
+# at /files/, neither of which should apply to a user's private KB uploads.
+# Files here are only ever served back through the authenticated-by-user_id
+# /api/kb/{document_id}/raw endpoint. Layout: kb_store/<user_id>/<document_id>/<filename>.
+_raw_kb_store_dir = Path(_RAW.get("KB_STORE_DIR", "./kb_store"))
+KB_STORE_DIR = _raw_kb_store_dir if _raw_kb_store_dir.is_absolute() else (REPO_ROOT / _raw_kb_store_dir).resolve()
+KB_STORE_DIR.mkdir(parents=True, exist_ok=True)
+
 MAX_CONCURRENT_TASKS = int(_RAW.get("backend", {}).get("max_concurrent_tasks", 2))
 
 # Vision/heavy tasks get their own, smaller concurrency slice than plain

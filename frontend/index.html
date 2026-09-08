@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign AI Workbench</title>
-<link rel="stylesheet" href="styles.css?v=20260914">
+<link rel="stylesheet" href="styles.css?v=20260916">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -28,7 +28,23 @@
         <span>Your chats will appear here</span>
       </div>
 
-      <div class="sidebar-section-label">Files &amp; Knowledge Base</div>
+      <div class="sidebar-section-label sidebar-section-label--kb">
+        <span>Knowledge Base</span>
+        <button class="kb-add-btn" id="kb-add-btn" title="Add a file to the Knowledge Base">
+          <iconify-icon icon="lucide:plus"></iconify-icon>
+        </button>
+      </div>
+      <div class="kb-search-wrap">
+        <iconify-icon icon="lucide:search"></iconify-icon>
+        <input type="search" id="kb-search" placeholder="Search files…" autocomplete="off">
+      </div>
+      <div id="kb-sidebar-list" class="task-sidebar-list kb-sidebar-list"></div>
+      <div id="kb-sidebar-empty" class="task-sidebar-empty" hidden>
+        <iconify-icon icon="lucide:book-marked"></iconify-icon>
+        <span>Add files here — every chat can use them</span>
+      </div>
+
+      <div class="sidebar-section-label">Files &amp; Deliverables</div>
       <div id="files-sidebar-list" class="task-sidebar-list"></div>
       <div id="files-sidebar-empty" class="task-sidebar-empty" hidden>
         <iconify-icon icon="lucide:folder-open"></iconify-icon>
@@ -129,6 +145,8 @@
 
     <input type="file" id="file-input"
       accept="application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp">
+    <input type="file" id="kb-file-input"
+      accept="application/pdf,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md">
     <div class="drop-hint" id="drop-hint" aria-hidden="true">
       <div class="drop-hint-inner">
         <iconify-icon icon="lucide:upload-cloud"></iconify-icon>
@@ -185,10 +203,34 @@
       <div class="template-sheet-body custom-scroll" id="template-sheet-body"></div>
     </div>
   </div>
+
+  <!-- Right-side document preview panel — opens in-page when a generated
+       deliverable or a Knowledge Base file is clicked (like Claude's preview). -->
+  <div class="preview-backdrop" id="preview-backdrop" hidden></div>
+  <aside class="preview-panel" id="preview-panel" hidden aria-label="Document preview">
+    <header class="preview-panel-head">
+      <div class="preview-panel-title">
+        <iconify-icon id="preview-panel-icon" icon="lucide:file-text"></iconify-icon>
+        <span class="name mono" id="preview-panel-name">Preview</span>
+      </div>
+      <div class="preview-panel-actions">
+        <a class="icon-btn" id="preview-open-tab" href="#" target="_blank" rel="noopener" title="Open in a new tab">
+          <iconify-icon icon="lucide:external-link"></iconify-icon>
+        </a>
+        <a class="icon-btn" id="preview-download" href="#" download title="Download">
+          <iconify-icon icon="lucide:download"></iconify-icon>
+        </a>
+        <button class="icon-btn" id="preview-close" title="Close preview">
+          <iconify-icon icon="lucide:x"></iconify-icon>
+        </button>
+      </div>
+    </header>
+    <div class="preview-panel-body custom-scroll" id="preview-panel-body"></div>
+  </aside>
 </div>
 
-<script src="app.js?v=20260914"></script>
-<script src="user.js?v=20260915"></script>
+<script src="app.js?v=20260916"></script>
+<script src="user.js?v=20260916"></script>
 <script>
   document.getElementById('sidebar-user-id').textContent = Store.USER_ID;
 </script>
