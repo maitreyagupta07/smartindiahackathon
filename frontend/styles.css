@@ -232,12 +232,21 @@ input, select { font-family: inherit; }
 .empty-hero .greet { font-size: 13.5px; color: var(--text-secondary); margin-bottom: 6px; }
 .empty-hero h1 { font-size: 26px; font-weight: 600; margin: 0 0 28px; letter-spacing: -0.01em; }
 
-/* ---- Live state strip ---- */
+/* ---- Live state strip ----
+   display:none when idle (not just opacity:0) — .composer-inner is a
+   flex column with `gap`, which still inserts its 10px gap on BOTH
+   sides of a present-but-empty/invisible flex item. Left as opacity-only
+   before, that meant every idle composer permanently carried 30px (the
+   strip's own height) + 20px (two flex gaps around it) of dead space
+   between whatever sits above it (e.g. the template chip row) and the
+   input below, for no visible reason. display:none removes it from the
+   flex layout entirely, so that space only appears while a task is
+   actually live. */
 .live-strip {
-  display: flex; align-items: center; justify-content: center; gap: 8px; height: 30px;
+  display: none; align-items: center; justify-content: center; gap: 8px; height: 30px;
   font-size: 11px; font-weight: 500; opacity: 0; transition: opacity .3s ease; pointer-events: none;
 }
-.live-strip.visible { opacity: 1; }
+.live-strip.visible { display: flex; opacity: 1; }
 .live-step { display: flex; align-items: center; gap: 6px; color: var(--text-muted); white-space: nowrap; }
 .live-step.done, .live-step.active { color: var(--accent); }
 .live-step .glyph { width: 12px; height: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

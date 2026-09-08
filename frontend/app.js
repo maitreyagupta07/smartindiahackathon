@@ -316,7 +316,20 @@ function initComposerDockSync() {
   const dock = document.getElementById('composer-dock');
   if (!dock) return;
   const root = document.documentElement;
-  const sync = () => root.style.setProperty('--composer-dock-h', `${dock.getBoundingClientRect().height}px`);
+  const scroller = document.getElementById('conversation-scroll');
+  const sync = () => {
+    // The dock's height (and so the padding this feeds) can change AFTER
+    // the conversation was already scrolled to its bottom (e.g. the
+    // observer fires on a later frame than renderConversation()'s own
+    // scrollTop=scrollHeight) — capture "was the view at the bottom"
+    // against the OLD scrollHeight before changing the padding, so
+    // growing/shrinking the dock doesn't leave the view stranded above
+    // the new true bottom (or, if it shrinks, unnecessarily short of it).
+    const wasNearBottom = !scroller
+      || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 200;
+    root.style.setProperty('--composer-dock-h', `${dock.getBoundingClientRect().height}px`);
+    if (scroller && wasNearBottom) scroller.scrollTop = scroller.scrollHeight;
+  };
   sync();
   if (typeof ResizeObserver === 'function') {
     new ResizeObserver(sync).observe(dock);
