@@ -527,26 +527,49 @@ def _repair_json_like(candidate: str) -> str:
     return cleaned
 
 
+def _stringify_content_value(value):
+    """
+    A `body`/`heading` given as a JSON array (e.g. a list of numbers)
+    becomes one NEWLINE-joined string, one item per line — NOT
+    json.dumps(value). filegen.py's docx/xlsx/pptx writers all split a
+    section's body on "\n" to lay out one paragraph/row/bullet per line;
+    json.dumps produces a single-line JSON-array-literal string instead
+    (observed live: an Excel cell literally containing the text
+    '["1", "\\n2", "\\n3", ...]' instead of one number per row) — valid as
+    a string, but not remotely what "formatted" means for a spreadsheet.
+    Each item is also stripped, since a list item can itself carry a stray
+    leading/trailing newline from the model's own output.
+    """
+    if isinstance(value, list):
+        return "\n".join(str(v).strip() for v in value)
+    if isinstance(value, dict):
+        return "\n".join(f"{k}: {v}" for k, v in value.items())
+    return str(value)
+
+
 def _coerce_file_content_types(obj: dict) -> dict:
     """
     A small model sometimes gets the SHAPE right (title/sections/heading/
     body all present) but not every value's TYPE — e.g. a `body` given as a
     JSON array of numbers instead of a string. Coercing those to strings
     (rather than rejecting the whole response and falling back to the raw,
-    unformatted prompt as file content) salvages an otherwise-fine response.
+    unformatted prompt as file content) salvages an otherwise-fine
+    response. Also strips markdown here — nothing downstream renders it
+    (see strip_markdown_emphasis), so a literal leading "#"/"**" would
+    otherwise show up as-is in the generated file.
     """
     if not isinstance(obj, dict):
         return obj
-    if "title" in obj and not isinstance(obj["title"], str):
-        obj["title"] = str(obj["title"])
+    if "title" in obj:
+        obj["title"] = strip_markdown_emphasis(_stringify_content_value(obj["title"]))
     sections = obj.get("sections")
     if isinstance(sections, list):
         for s in sections:
             if not isinstance(s, dict):
                 continue
             for key in ("heading", "body"):
-                if key in s and not isinstance(s[key], str):
-                    s[key] = json.dumps(s[key]) if isinstance(s[key], (list, dict)) else str(s[key])
+                if key in s:
+                    s[key] = strip_markdown_emphasis(_stringify_content_value(s[key]))
     return obj
 
 
@@ -654,18 +677,26 @@ def _strip_file_format_phrase(prompt: str) -> str:
 
 def strip_markdown_emphasis(text: str) -> str:
     """
-    The approval-note LoRA adapter sometimes writes markdown-style emphasis
-    (**bold**, __bold__) into its output, but nothing downstream renders
-    markdown — not the plain-text API response, and not the docx writer,
-    which just writes characters literally. Left alone, that means literal
-    asterisks show up in both the text answer and the Word document (visible
-    as "**Date:**" instead of an actually bold "Date:"). Strip it here, in
-    code, right after the model call, rather than asking the model not to
-    use markdown (an instruction a small model won't reliably follow).
+    The approval-note LoRA adapter (and, observed live, the base model's
+    filegen content-prep stage too) sometimes writes markdown-style
+    emphasis/headings (**bold**, __bold__, "# Heading") into its output,
+    but nothing downstream renders markdown — not the plain-text API
+    response, and not the docx/xlsx/pptx writers, which just write
+    characters literally. Left alone, that means literal asterisks and
+    "#" characters show up in both the text answer and the generated
+    file (visible as "**Date:**" instead of an actually bold "Date:", or
+    a stray "# Overview" line instead of a real heading — filegen.py's
+    writers already apply REAL heading styling via their own APIs
+    wherever a section's `heading` field is used, so a leading "#" in
+    the text itself is always redundant, never needed). Strip it here,
+    in code, right after the model call, rather than asking the model
+    not to use markdown (an instruction a small model won't reliably
+    follow).
     """
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"__(.+?)__", r"\1", text)
-    return text.replace("**", "").replace("__", "")
+    text = text.replace("**", "").replace("__", "")
+    return re.sub(r"(?m)^#{1,6}[ \t]+", "", text)
 
 
 def _approval_note_text_to_file_content(raw_text: str) -> dict:
@@ -973,7 +1004,17 @@ def _filegen_entry_step(state: TaskState) -> NextStep:
     of drifting out of sync.
     """
     filegen_model = _filegen_model(state.prompt)
-    if _needs_computation(state.prompt):
+    # Scoped to THIS deliverable's own text when the request cleanly split
+    # (see _scoped_deliverable_prompt) — checking the full combined prompt
+    # here means a request like "...word doc on winters in egypt then
+    # excel of first 10 numbers..." sees "numbers" and spuriously runs a
+    # whole codegen -> execute_code chain for the ESSAY deliverable too,
+    # which has nothing to compute at all. Observed live: the model wrote
+    # nonsense Python (an `import requests` "fetch data" attempt) trying
+    # to satisfy that spurious instruction, which then fed a garbled
+    # content-prep stage and fell back to raw-prompt content.
+    computation_scope_prompt, _ = _scoped_deliverable_prompt(state)
+    if _needs_computation(computation_scope_prompt):
         print(
             f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
             f"-> call_qwen model={filegen_model} (generate verification code, computation detected)"

@@ -59,6 +59,31 @@ def _generate_docx(content: dict, out_path: Path):
     doc.save(out_path)
 
 
+def _split_list_like_line(line: str) -> list[str]:
+    """
+    A section body that's really a flat list of short values often arrives
+    as ONE comma-separated line (e.g. "1, 1, 2, 3, 5, 8, 13, 21, 34, 55" or
+    "[1], [2], [3], ..., and [10]") rather than one value per line — the
+    upstream model wrote it as a run-on sentence-shaped string, not JSON,
+    so app/agent/planner.py's list-to-newlines coercion never gets a
+    chance to help. Left as one line, that one line becomes ONE Excel row
+    with everything crammed in a single cell — reported live as "excel
+    isn't formatted". Splitting it into one row per value here is what
+    "an Excel report" actually means for genuinely list-shaped content.
+
+    Deliberately conservative: only treats a line as a list when it has
+    several SHORT, single-token, comma-separated parts — a real sentence
+    with commas ("Egypt, located in North Africa, has hot summers") must
+    NOT be exploded into nonsense one-word "rows".
+    """
+    candidate = re.sub(r",?\s*\band\s+", ", ", line, flags=re.IGNORECASE)
+    parts = [p.strip().strip("[]") for p in candidate.split(",")]
+    parts = [p for p in parts if p]
+    if len(parts) >= 3 and all(len(p) <= 20 and " " not in p for p in parts):
+        return parts
+    return [line]
+
+
 def _generate_xlsx(content: dict, out_path: Path):
     title = content.get("title", "Untitled")
     sections = content.get("sections", [])
@@ -80,8 +105,10 @@ def _generate_xlsx(content: dict, out_path: Path):
             row += 1
         if sec_body:
             for line in sec_body.split("\n"):
-                if line.strip():
-                    ws.cell(row=row, column=1, value=line)
+                if not line.strip():
+                    continue
+                for item in _split_list_like_line(line):
+                    ws.cell(row=row, column=1, value=item)
                     row += 1
         row += 1  # blank spacer row between sections
 
