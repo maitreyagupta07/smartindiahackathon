@@ -44,6 +44,22 @@ def _strip_filegen_marker(prompt: str) -> str:
     return prompt
 
 
+def _exc_message(exc: Exception) -> str:
+    """
+    str(exc) is EMPTY for some real exceptions — notably httpx's own
+    ReadTimeout, observed live: a slow Ollama call hit call_inference's
+    120s timeout, str(the resulting httpx.ReadTimeout) was "", and
+    state.error got set to that empty string. `if state.error:` (a
+    truthiness check, not an existence check) then treated the empty
+    string as "no error", and the task silently finished as status=
+    "completed" with a blank text result instead of status="failed"
+    with a clear message. Falling back to the exception's type name
+    guarantees state.error is always a genuinely truthy, non-empty
+    string whenever a real exception occurred.
+    """
+    return str(exc) or f"{type(exc).__name__} (no further detail from the exception itself)"
+
+
 async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
     # Built fresh per call (not at module import time) so that patching
     # execute_code/search_docs/generate_file at the module level — e.g. in
@@ -119,16 +135,17 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                         completion_tokens=usage.get("completion_tokens"),
                     )
                 except Exception as step_exc:  # noqa: BLE001
-                    print(f"[LOOP] task_id={state.task_id} model={next_step.model} ERROR: {step_exc}")
+                    message = _exc_message(step_exc)
+                    print(f"[LOOP] task_id={state.task_id} model={next_step.model} ERROR: {message}")
                     state.add_step(
                         action=next_step.action,
                         model_used=next_step.model,
                         prompt_used=next_step.prompt,
                         observation=None,
                         status="error",
-                        error=str(step_exc),
+                        error=message,
                     )
-                    state.error = str(step_exc)
+                    state.error = message
                     # Loop continues one more iteration so the planner
                     # observes the error and decides retry/finalize.
 
@@ -175,18 +192,19 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                     # error state (e.g. this was a retry that succeeded).
                     state.error = None
                 except Exception as tool_exc:  # noqa: BLE001
-                    print(f"[LOOP] task_id={state.task_id} tool={next_step.tool_name} ERROR: {tool_exc}")
+                    message = _exc_message(tool_exc)
+                    print(f"[LOOP] task_id={state.task_id} tool={next_step.tool_name} ERROR: {message}")
                     state.add_step(
                         action="call_tool",
                         model_used=None,
                         prompt_used=str(tool_args),
                         observation=None,
                         status="error",
-                        error=str(tool_exc),
+                        error=message,
                         tool_name=next_step.tool_name,
                         tool_args=tool_args,
                     )
-                    state.error = str(tool_exc)
+                    state.error = message
                     # Loop continues — planner decides retry vs finalize
                     # for tool failures (see planner.py MAX_TOOL_ATTEMPTS).
 
@@ -221,10 +239,16 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             and last_step.tool_name == "generate_file"
             and last_step.status == "ok"
         ):
-            file_obs = last_step.observation or {}
+            # state.file_url/file_name (back-compat, always the FIRST file)
+            # and state.generated_files (every file, in order — see
+            # app/agent/planner.py's _filegen_entry_step for how a
+            # multi-deliverable request like "...word doc on X then excel
+            # of Y..." now produces more than one) rather than reading
+            # last_step.observation directly, which is only ever the LAST
+            # generate_file call's own single result.
             print(
                 f"[LOOP] task_id={state.task_id} END status=completed "
-                f"result_type=file file_url={file_obs.get('file_url')}"
+                f"result_type=file files={state.generated_files}"
             )
             return ExecuteTaskResponse(
                 status="completed",
@@ -233,8 +257,9 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 result=TaskResult(
                     type="file",
                     text=None,
-                    file_url=file_obs.get("file_url"),
-                    file_name=file_obs.get("file_name"),
+                    file_url=state.file_url,
+                    file_name=state.file_name,
+                    files=state.generated_files or None,
                 ),
                 error=None,
                 models_used=state.models_used or None,

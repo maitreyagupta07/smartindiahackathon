@@ -65,9 +65,20 @@ class TaskState:
     # flow progresses so later steps (and the final response) can see what was
     # verified/prepared without re-deriving it from step_records.
     prepared_file_content: dict | None = None  # structured {"title","sections"} built for generate_file
-    file_type: str | None = None               # "docx" | "xlsx" | "pptx" once determined
-    file_url: str | None = None
-    file_name: str | None = None
+    file_type: str | None = None               # "docx" | "xlsx" | "pptx" — the CURRENT file being produced
+    file_url: str | None = None                # back-compat: always the FIRST generated file
+    file_name: str | None = None               # back-compat: always the FIRST generated file
+
+    # Multi-deliverable file-generation — e.g. "...in word doc then make an
+    # excel report of...". file_types holds EVERY distinct format actually
+    # requested, in the order named; file_index is which one is currently
+    # being produced; generated_files accumulates {"file_url","file_name"}
+    # for each one completed so far, in order. A plain single-file request
+    # just has len(file_types) == 1, and this whole mechanism is a no-op —
+    # the loop already finalizes after the first (only) generate_file call.
+    file_types: list[str] = field(default_factory=list)
+    file_index: int = 0
+    generated_files: list[dict] = field(default_factory=list)
 
     def add_step(
         self,

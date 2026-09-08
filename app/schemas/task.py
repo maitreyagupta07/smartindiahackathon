@@ -30,6 +30,17 @@ class TaskResult(BaseModel):
     # the KB passages the answer was grounded in. Optional/defaulted so the
     # §2.4 response shape is unchanged for every other flow.
     sources: Optional[list[dict]] = None
+    # Additive, optional — a request naming multiple deliverables in one
+    # message (e.g. "...word doc on X then excel of Y...") now actually
+    # produces every one of them (see app/agent/planner.py's
+    # _filegen_entry_step / state.file_types), not just the first. Each
+    # entry is {"file_url": str, "file_name": str}, in the order requested.
+    # file_url/file_name above are UNCHANGED — always the first file, same
+    # as a plain single-deliverable request always looked like — so every
+    # existing caller that only reads those two fields keeps working
+    # exactly as before; only a caller that wants every file needs to
+    # look at this new field.
+    files: Optional[list[dict]] = None
 
 
 class ExecuteTaskResponse(BaseModel):

@@ -278,22 +278,32 @@ function renderTurn(turn) {
   const result = turn.result || {};
   let body = '';
   if (result.type === 'file') {
-    const fn = result.file_name || 'deliverable';
-    const url = result.file_url || '#';
-    body = `
-      <div class="deliverable-card">
-        <div class="left">
-          <div class="file-icon"><iconify-icon icon="${fileTypeIcon(fn)}"></iconify-icon></div>
-          <div style="min-width:0">
-            <div class="name mono">${escapeHtml(fn)}</div>
-            <div class="status-line"><span class="status-dot ok"></span>Ready</div>
+    // A single request can now name multiple deliverables (e.g. "...word
+    // doc on X then excel of Y...") and result.files holds every one, in
+    // order — file_url/file_name alone are always just the first, same as
+    // a plain single-deliverable result always looked like, so this only
+    // needs to branch when there's genuinely more than one to show.
+    const files = Array.isArray(result.files) && result.files.length > 1
+      ? result.files
+      : [{ file_url: result.file_url, file_name: result.file_name }];
+    body = files.map((f) => {
+      const fn = f.file_name || 'deliverable';
+      const url = f.file_url || '#';
+      return `
+        <div class="deliverable-card">
+          <div class="left">
+            <div class="file-icon"><iconify-icon icon="${fileTypeIcon(fn)}"></iconify-icon></div>
+            <div style="min-width:0">
+              <div class="name mono">${escapeHtml(fn)}</div>
+              <div class="status-line"><span class="status-dot ok"></span>Ready</div>
+            </div>
           </div>
-        </div>
-        <div class="actions">
-          <a class="btn-ghost" href="${url}" target="_blank" rel="noopener">Open</a>
-          <a class="btn-icon-accent" href="${url}" download><iconify-icon icon="lucide:download" style="font-size:16px"></iconify-icon></a>
-        </div>
-      </div>`;
+          <div class="actions">
+            <a class="btn-ghost" href="${url}" target="_blank" rel="noopener">Open</a>
+            <a class="btn-icon-accent" href="${url}" download><iconify-icon icon="lucide:download" style="font-size:16px"></iconify-icon></a>
+          </div>
+        </div>`;
+    }).join('<div style="height:8px"></div>');
   } else if (result.text) {
     const plain = answerToPlainText(result.text);
     body = `<div class="ai-rich">${renderRichText(result.text)}</div>${renderSources(result.sources)}` +
@@ -387,7 +397,10 @@ function renderTaskSidebar() {
   const files = [];
   chatMessages.forEach((m) => {
     if (m.role === 'assistant' && m.result && m.result.type === 'file' && m.result.file_name) {
-      files.push({ name: m.result.file_name, url: m.result.file_url || '#' });
+      const rf = Array.isArray(m.result.files) && m.result.files.length > 1
+        ? m.result.files
+        : [{ file_name: m.result.file_name, file_url: m.result.file_url }];
+      rf.forEach((f) => { if (f.file_name) files.push({ name: f.file_name, url: f.file_url || '#' }); });
     }
     if (m.role === 'system' && m.kind === 'upload' && m.filename) {
       files.push({ name: m.filename, url: null, kb: true });

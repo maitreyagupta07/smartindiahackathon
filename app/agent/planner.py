@@ -97,6 +97,16 @@ MAX_TOOL_ATTEMPTS = 2
 # default) for every other model — this is scoped to the adapter only.
 LORA_TEMPERATURE = 0.2
 
+# The document-generation codegen/content-prep stages ask for strict,
+# machine-parseable output (runnable Python; a specific JSON schema) —
+# not creative writing — and Ollama's own default temperature (~0.8) was
+# observed live to produce genuinely malformed JSON often enough to
+# matter (a stray unquoted key, mismatched quote escaping) even when the
+# model otherwise understood the task correctly. A lower, steadier
+# temperature measurably reduces that failure mode, the same reasoning
+# LORA_TEMPERATURE already uses for the approval-note adapter.
+FILEGEN_STRUCTURED_TEMPERATURE = 0.3
+
 # Internal stage markers prefixed onto call_qwen prompts during the
 # document-generation flow so decide_next_step can tell, purely from
 # state.step_records (no extra mutable flow-control state), which stage of
@@ -228,8 +238,74 @@ def _detect_file_type(prompt: str) -> str:
     return types[0] if types else "docx"  # default per problem statement's approval-note use case
 
 
-def _build_generate_file_args(prompt: str) -> dict:
-    file_type = _detect_file_type(prompt)
+_SEQUENCE_CONNECTOR_RE = re.compile(r"\s*(?:,\s*)?\b(?:and then|then|after that|afterwards|next)\b\s*", re.IGNORECASE)
+
+
+def _split_multi_deliverable_prompt(prompt: str, file_types: list[str]) -> dict[str, str]:
+    """
+    Best-effort split of a multi-deliverable prompt ("...word doc on X then
+    excel of Y...") into one text fragment per deliverable, using common
+    sequencing connectors ("then", "and then", "after that", ...).
+
+    This exists because telling the model "you're only doing X right now,
+    ignore the Y part" was NOT reliable on this size of local model —
+    observed live, across repeated attempts: it sometimes still included
+    the other topic's content anyway, and after a more forceful version of
+    that instruction, sometimes overcorrected into producing NO content at
+    all ({"title": "", "sections": []}). Splitting the prompt so each
+    deliverable's content-prep call is only ever shown ITS OWN fragment —
+    never even sees the other deliverable's text — sidesteps needing the
+    model to selectively ignore part of what it's given, for the common
+    "X in FORMAT1, then Y in FORMAT2" phrasing pattern.
+
+    Returns {} (never partial) when the split doesn't cleanly produce
+    exactly one fragment naming exactly one of each requested type —
+    ambiguous/unusual phrasing — so callers can fall back to the
+    whole-prompt + explicit-instruction approach instead.
+    """
+    if len(file_types) < 2:
+        return {}
+    fragments = [f.strip() for f in _SEQUENCE_CONNECTOR_RE.split(prompt) if f.strip()]
+    if len(fragments) < 2:
+        return {}
+    mapping: dict[str, str] = {}
+    for frag in fragments:
+        types_in_frag = _detect_requested_file_types(frag)
+        if len(types_in_frag) == 1 and types_in_frag[0] not in mapping:
+            mapping[types_in_frag[0]] = frag
+    return mapping if set(mapping) == set(file_types) else {}
+
+
+def _scoped_deliverable_prompt(state: "TaskState") -> tuple[str, bool]:
+    """
+    Returns (prompt_text_to_send_to_qwen, was_cleanly_split) for the
+    deliverable state is CURRENTLY producing (state.file_type). When the
+    split succeeds, prompt_text_to_send_to_qwen is JUST that deliverable's
+    own fragment — the model is never shown the other deliverable's text
+    at all. When it doesn't (single-deliverable request, or phrasing the
+    splitter can't cleanly parse), falls back to the full original prompt.
+    """
+    if len(state.file_types) < 2:
+        return state.prompt, False
+    mapping = _split_multi_deliverable_prompt(state.prompt, state.file_types)
+    if state.file_type in mapping:
+        return mapping[state.file_type], True
+    return state.prompt, False
+
+
+def _build_generate_file_args(prompt: str, state: Optional[TaskState] = None) -> dict:
+    """
+    Last-resort fallback content when the content-prep JSON stage couldn't
+    be parsed at all — dumps the raw request as a single "Details" section
+    rather than failing the whole task. When state is a multi-deliverable
+    request, uses just this deliverable's own text fragment (when the
+    prompt cleanly split — see _scoped_deliverable_prompt) so even this
+    fallback doesn't dump the OTHER deliverable's request text into a file
+    that has nothing to do with it.
+    """
+    file_type = state.file_type if state is not None and state.file_type else _detect_file_type(prompt)
+    if state is not None:
+        prompt, _ = _scoped_deliverable_prompt(state)
     title = prompt.strip().splitlines()[0][:80] or "Generated Document"
     content = {
         "title": title,
@@ -290,13 +366,15 @@ def _needs_computation(prompt: str) -> bool:
     return bool(_COMPUTE_KEYWORD_RE.search(prompt.lower()))
 
 
-def _build_filegen_code_prompt(original_prompt: str) -> str:
+def _build_filegen_code_prompt(original_prompt: str, state: Optional[TaskState] = None) -> str:
     """
     Asks Qwen to produce a runnable Python script (executed via Person C's
     execute_code tool) that computes whatever data the file-generation
     request needs, printing it as JSON so the next stage can ground the
     file content in verified output rather than model arithmetic.
     """
+    if state is not None:
+        original_prompt, _ = _scoped_deliverable_prompt(state)
     return (
         "You are preparing verified data for a document/spreadsheet generation request.\n"
         f"User request: \"{original_prompt}\"\n\n"
@@ -358,12 +436,30 @@ def _is_usable_python(code: str) -> bool:
         return False
 
 
-def _build_filegen_content_prompt(original_prompt: str, verified_data: Optional[str]) -> str:
+def _build_filegen_content_prompt(
+    original_prompt: str, verified_data: Optional[str], state: Optional[TaskState] = None
+) -> str:
     """
     Asks Qwen to turn the user's request (optionally grounded in verified
     execute_code output) into Person C's FileContent JSON schema. This is
     the step that must NEVER be skipped in favor of copying the raw prompt.
     """
+    # A prompt like "...in word doc then make an excel report of..." names
+    # TWO different deliverables in one message; run_agent_loop now DOES
+    # produce both (see _filegen_entry_step / state.file_types), one at a
+    # time, in order. Preferred approach: split the prompt so this call
+    # only ever SEES its own deliverable's text (_scoped_deliverable_prompt)
+    # — the model can't leak the other topic in if it was never shown it.
+    # Fallback approach (split didn't cleanly parse the phrasing): send the
+    # full prompt with an explicit "ignore the other part" instruction —
+    # observed live to be less reliable on its own (sometimes still
+    # included the other topic; a more forceful version of the instruction
+    # sometimes overcorrected into empty content instead), so it's kept
+    # only as a safety net, not the primary mechanism.
+    was_split = False
+    if state is not None:
+        original_prompt, was_split = _scoped_deliverable_prompt(state)
+
     data_block = (
         f"Verified computed data (use these exact values — do not recompute, "
         f"alter, or shorten them):\n{verified_data}\n\n"
@@ -375,30 +471,22 @@ def _build_filegen_content_prompt(original_prompt: str, verified_data: Optional[
         guidance_block = f"Follow this structure — one JSON section per numbered item:\n{_comparison_instructions()}\n\n"
     else:
         guidance_block = ""
-    # A single task produces exactly ONE file (contract §2.4's TaskResult
-    # has one file_url/file_name, not a list) — but a prompt like "...in
-    # word doc then make an excel report of..." names TWO different
-    # deliverables in one message. Without this, Qwen was asked to make
-    # the JSON "fully represent" the WHOLE prompt and dutifully crammed
-    # both unrelated deliverables' content into the one file being made
-    # (observed live: an .xlsx whose cells held an Italy-summer essay
-    # paragraph AND a Fibonacci list, in the same document, because
-    # _detect_file_type had already committed to producing only an
-    # .xlsx). Scoping this stage to only the chosen format's own topic
-    # — and telling it to leave the rest out rather than merge it in —
-    # fixes the mixed-content symptom even though true multi-file output
-    # in one task is a bigger contract change, not done here.
-    multi_types = _detect_requested_file_types(original_prompt)
-    if len(multi_types) > 1:
-        chosen = multi_types[0]
-        others = ", ".join(t.upper() for t in multi_types[1:])
+    if state is not None and len(state.file_types) > 1 and not was_split:
+        chosen = state.file_type
+        already_done = [t for i, t in enumerate(state.file_types) if i < state.file_index]
+        still_pending = [t for i, t in enumerate(state.file_types) if i > state.file_index]
+        other_notes = []
+        if already_done:
+            other_notes.append(f"already generated separately: {', '.join(t.upper() for t in already_done)}")
+        if still_pending:
+            other_notes.append(f"will be generated separately right after this one: {', '.join(t.upper() for t in still_pending)}")
         scope_block = (
-            f"IMPORTANT: this single request actually names MULTIPLE separate deliverables "
-            f"(you are generating only the {chosen.upper()} one right now). Include content for "
-            f"ONLY the part of the request that belongs in this {chosen.upper()} file. Completely "
-            f"leave out any content that belongs to the other requested deliverable(s) "
-            f"({others}) — do not summarize, mention, or merge it in. It will be generated "
-            f"separately if the user asks for it again.\n\n"
+            f"IMPORTANT: this request names MULTIPLE separate deliverables. You are producing "
+            f"ONLY the {chosen.upper()} file right now ({'; '.join(other_notes)}). Produce sections "
+            f"for the {chosen.upper()} topic ONLY. Do NOT create a section for any other "
+            f"deliverable — not even a short one. If a value for another deliverable isn't a "
+            f"real fact from the {chosen.upper()} topic itself, leave it out entirely rather than "
+            f"invent or guess at it.\n\n"
         )
     else:
         scope_block = ""
@@ -419,10 +507,55 @@ def _build_filegen_content_prompt(original_prompt: str, verified_data: Optional[
     )
 
 
+_JS_LINE_COMMENT_RE = re.compile(r"//[^\n\"]*(?=\n|$)")
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+_BARE_NONFINITE_RE = re.compile(r"\b(NaN|-?Infinity)\b")
+
+
+def _repair_json_like(candidate: str) -> str:
+    """
+    Cheap, targeted cleanup for the specific malformed-JSON patterns a small
+    quantized model actually produces here (observed live: a `body` value
+    containing a JS-style `// comment`, bare `NaN`, and a trailing comma —
+    none of which are valid JSON). NOT a general JSON5 parser — just strips
+    the handful of concrete mistakes seen in practice, applied only as a
+    fallback AFTER a plain json.loads has already failed once.
+    """
+    cleaned = _JS_LINE_COMMENT_RE.sub("", candidate)
+    cleaned = _BARE_NONFINITE_RE.sub("null", cleaned)
+    cleaned = _TRAILING_COMMA_RE.sub(r"\1", cleaned)
+    return cleaned
+
+
+def _coerce_file_content_types(obj: dict) -> dict:
+    """
+    A small model sometimes gets the SHAPE right (title/sections/heading/
+    body all present) but not every value's TYPE — e.g. a `body` given as a
+    JSON array of numbers instead of a string. Coercing those to strings
+    (rather than rejecting the whole response and falling back to the raw,
+    unformatted prompt as file content) salvages an otherwise-fine response.
+    """
+    if not isinstance(obj, dict):
+        return obj
+    if "title" in obj and not isinstance(obj["title"], str):
+        obj["title"] = str(obj["title"])
+    sections = obj.get("sections")
+    if isinstance(sections, list):
+        for s in sections:
+            if not isinstance(s, dict):
+                continue
+            for key in ("heading", "body"):
+                if key in s and not isinstance(s[key], str):
+                    s[key] = json.dumps(s[key]) if isinstance(s[key], (list, dict)) else str(s[key])
+    return obj
+
+
 def _parse_structured_content(text: str) -> Optional[dict]:
     """
     Best-effort extraction of a FileContent-shaped JSON object out of a Qwen
-    response, tolerating stray markdown fences or leading/trailing prose.
+    response, tolerating stray markdown fences, leading/trailing prose, a
+    handful of common small-model JSON mistakes (see _repair_json_like), and
+    right-shaped-but-wrong-typed values (see _coerce_file_content_types).
     """
     if not text:
         return None
@@ -433,16 +566,14 @@ def _parse_structured_content(text: str) -> Optional[dict]:
             if part.startswith("{"):
                 candidate = part
                 break
-    try:
-        return json.loads(candidate)
-    except (json.JSONDecodeError, TypeError):
-        pass
     start, end = candidate.find("{"), candidate.rfind("}")
-    if start != -1 and end != -1 and end > start:
+    if start != -1 and end > start:
+        candidate = candidate[start:end + 1]
+    for attempt in (candidate, _repair_json_like(candidate)):
         try:
-            return json.loads(candidate[start:end + 1])
-        except json.JSONDecodeError:
-            return None
+            return _coerce_file_content_types(json.loads(attempt))
+        except (json.JSONDecodeError, TypeError):
+            continue
     return None
 
 
@@ -831,6 +962,59 @@ def _tool_attempt_count(state: TaskState, tool_name: str) -> int:
     )
 
 
+def _filegen_entry_step(state: TaskState) -> NextStep:
+    """
+    Decides the first Qwen call for producing state.file_type — the SAME
+    decision whether this is the very first deliverable (called from step 0)
+    or a later one in a multi-deliverable request like "...word doc on X
+    then excel of Y..." (called again from the "generate_file observed"
+    branch below, once state.file_index has moved to the next file_type).
+    Factored out so both call sites make this decision identically instead
+    of drifting out of sync.
+    """
+    filegen_model = _filegen_model(state.prompt)
+    if _needs_computation(state.prompt):
+        print(
+            f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
+            f"-> call_qwen model={filegen_model} (generate verification code, computation detected)"
+        )
+        return NextStep(
+            action="call_qwen",
+            model=filegen_model,
+            prompt=FILEGEN_CODE_MARKER + _build_filegen_code_prompt(state.prompt, state=state),
+            temperature=FILEGEN_STRUCTURED_TEMPERATURE,
+        )
+    if filegen_model == LORA_ADAPTER:
+        # The adapter is trained to write approval notes directly in its
+        # own free-text format, not Person C's generic FileContent JSON —
+        # asking it for JSON here would push it off the distribution it
+        # was trained on. Call it plainly, as trained, and turn its real
+        # output into sections in code afterwards (see
+        # _approval_note_text_to_file_content) instead of re-prompting it
+        # to invent a schema.
+        print(
+            f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
+            f"-> call_qwen model={LORA_ADAPTER} (approval-note LoRA, trained free-text format)"
+        )
+        core_prompt = _strip_file_format_phrase(state.prompt)
+        return NextStep(
+            action="call_qwen",
+            model=LORA_ADAPTER,
+            prompt=FILEGEN_CONTENT_MARKER + _build_lora_prompt(state, core_prompt),
+            temperature=LORA_TEMPERATURE,
+        )
+    print(
+        f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
+        f"-> call_qwen model={filegen_model} (content-preparation stage)"
+    )
+    return NextStep(
+        action="call_qwen",
+        model=filegen_model,
+        prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, None, state=state),
+        temperature=FILEGEN_STRUCTURED_TEMPERATURE,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core planner
 # ---------------------------------------------------------------------------
@@ -906,46 +1090,27 @@ def decide_next_step(state: TaskState) -> NextStep:
             )
 
         if state.task_type == "document-generation":
-            state.file_type = _detect_file_type(state.prompt)
-            filegen_model = _filegen_model(state.prompt)
-            if _needs_computation(state.prompt):
-                print(
-                    f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={filegen_model} "
-                    f"(filegen: generate verification code, computation detected in request)"
-                )
-                return NextStep(
-                    action="call_qwen",
-                    model=filegen_model,
-                    prompt=FILEGEN_CODE_MARKER + _build_filegen_code_prompt(state.prompt),
-                )
-            if filegen_model == LORA_ADAPTER:
-                # The adapter is trained to write approval notes directly in
-                # its own free-text format, not Person C's generic FileContent
-                # JSON — asking it for JSON here would push it off the
-                # distribution it was trained on. Call it plainly, as trained,
-                # and turn its real output into sections in code afterwards
-                # (see _approval_note_text_to_file_content in the replan step
-                # below) instead of re-prompting it to invent a schema.
-                print(
-                    f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={LORA_ADAPTER} "
-                    f"(filegen: approval-note LoRA adapter, called in its trained free-text format)"
-                )
-                core_prompt = _strip_file_format_phrase(state.prompt)
-                return NextStep(
-                    action="call_qwen",
-                    model=LORA_ADAPTER,
-                    prompt=FILEGEN_CONTENT_MARKER + _build_lora_prompt(state, core_prompt),
-                    temperature=LORA_TEMPERATURE,
-                )
-            print(
-                f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={filegen_model} "
-                f"(filegen: content-preparation stage)"
-            )
-            return NextStep(
-                action="call_qwen",
-                model=filegen_model,
-                prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, None),
-            )
+            # Every distinct file format actually named in the prompt, in
+            # the order requested — see _filegen_entry_step's docstring for
+            # how state.file_index steps through these one at a time.
+            state.file_types = _detect_requested_file_types(state.prompt) or ["docx"]
+            state.file_index = 0
+            state.file_type = state.file_types[0]
+            # Each deliverable can take up to 4 steps on its own (codegen ->
+            # execute_code -> content-prep -> generate_file, when the request
+            # needs verified computation) — the single-deliverable default
+            # (MAX_STEPS_DEFAULT) doesn't leave enough room for a second (or
+            # third) deliverable's full chain in the same task. The +2 slack
+            # (matching the default's own cushion over its single-deliverable
+            # worst case of 4) is NOT optional headroom — hit_max_steps() is
+            # checked BEFORE a step's own result is processed, so with zero
+            # slack the final generate_file's own success is never actually
+            # observed: the loop force-finalizes right on top of it instead
+            # of recording it, silently dropping the last deliverable
+            # (observed live: steps showed a successful 2nd generate_file
+            # call, but state.generated_files only ever had 1 entry).
+            state.max_steps = max(state.max_steps, 4 * len(state.file_types) + 2)
+            return _filegen_entry_step(state)
 
         # text-generation (default).
         # An approval-note-flavored request uses the same LoRA adapter as
@@ -1066,7 +1231,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                         f"[PLANNER] task_id={state.task_id} filegen content-prep returned invalid JSON "
                         f"-> falling back to raw-prompt content"
                     )
-                    content = _build_generate_file_args(state.prompt)["content"]
+                    content = _build_generate_file_args(state.prompt, state=state)["content"]
             state.prepared_file_content = content
             file_type = state.file_type or _detect_file_type(state.prompt)
             print(
@@ -1099,7 +1264,8 @@ def decide_next_step(state: TaskState) -> NextStep:
                 return NextStep(
                     action="call_qwen",
                     model=filegen_model,
-                    prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, stdout),
+                    prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, stdout, state=state),
+                    temperature=LORA_TEMPERATURE if filegen_model == LORA_ADAPTER else FILEGEN_STRUCTURED_TEMPERATURE,
                 )
             reasoning_prompt = _build_code_result_prompt(state.prompt, last.observation or {})
             print(f"[PLANNER] task_id={state.task_id} execute_code observed -> chaining to call_qwen")
@@ -1132,14 +1298,37 @@ def decide_next_step(state: TaskState) -> NextStep:
 
         if last.tool_name == "generate_file":
             # File is the deliverable itself — do not let Qwen describe it,
-            # just finalize with the file result already in the observation.
+            # just record it. state.file_url/file_name (singular, back-compat
+            # with every existing caller/test) always reflect the FIRST file
+            # generated; state.generated_files accumulates every one, in
+            # order, for the additive multi-file response field.
             file_obs = last.observation or {}
-            state.file_url = file_obs.get("file_url")
-            state.file_name = file_obs.get("file_name")
+            generated = {"file_url": file_obs.get("file_url"), "file_name": file_obs.get("file_name")}
+            state.generated_files.append(generated)
+            if state.file_url is None:
+                state.file_url = generated["file_url"]
+                state.file_name = generated["file_name"]
             print(
                 f"[PLANNER] task_id={state.task_id} generate_file observed "
-                f"file_url={state.file_url} file_name={state.file_name} -> finalize (file is the result)"
+                f"[{state.file_index + 1}/{len(state.file_types) or 1}] "
+                f"file_url={generated['file_url']} file_name={generated['file_name']}"
             )
+
+            state.file_index += 1
+            if state.file_index < len(state.file_types):
+                # More deliverables were named in the same request (e.g.
+                # "...word doc on X then excel of Y...") — move on to the
+                # next one and restart its own content-prep from scratch,
+                # exactly like the first deliverable did at step 0.
+                state.file_type = state.file_types[state.file_index]
+                state.prepared_file_content = None
+                print(
+                    f"[PLANNER] task_id={state.task_id} -> starting next deliverable "
+                    f"[{state.file_index + 1}/{len(state.file_types)}]={state.file_type}"
+                )
+                return _filegen_entry_step(state)
+
+            print(f"[PLANNER] task_id={state.task_id} all requested deliverable(s) generated -> finalize")
             return NextStep(action="finalize")
 
         print(f"[PLANNER] task_id={state.task_id} unknown tool_name '{last.tool_name}' -> finalize")
@@ -1164,5 +1353,5 @@ def _rebuild_tool_args(state: TaskState, failed_step) -> dict:
     if failed_step.tool_name == "search_docs":
         return {"query": state.prompt, "top_k": 3}
     if failed_step.tool_name == "generate_file":
-        return _build_generate_file_args(state.prompt)
+        return _build_generate_file_args(state.prompt, state=state)
     return {}
