@@ -10,7 +10,7 @@
   "models": {
     "text_model": "qwen2.5:1.5b-instruct",
     "vision_model": "moondream",
-    "lora_adapter": null
+    "lora_adapter": "approval-note-lora"
   },
   "backend": {
     "max_concurrent_tasks": 2

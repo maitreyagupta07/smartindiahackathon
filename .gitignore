@@ -14,3 +14,7 @@ __pycache__/
 
 # Persistent per-operator global Knowledge Base — original uploaded bytes
 kb_store/
+
+# Locally-downloaded extra models (SD Turbo, MOMENT-1-small, etc.) — this
+# machine's GPU-capacity downloads, not part of the committed contract/code.
+extra_models/

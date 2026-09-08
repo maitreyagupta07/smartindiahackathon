@@ -1,0 +1,83 @@
+INFO:     Started server process [26972]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:55647 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55657 - "POST /api/submit-task HTTP/1.1" 200 OK
+[LOOP] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 START prompt='Write one sentence about refinery safety.' has_file=False chat_id=None
+[ROUTER] task_type=text-generation first_model=qwen2.5:1.5b-instruct needs_reasoning=False confidence=0.0 multi_step=False workflow=None matched=[] all_scores={'code-execution': 0.0, 'doc-search': 0.0, 'document-generation': 0.0}
+[PLANNER] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 step0 -> call_qwen model=qwen2.5:1.5b-instruct (text entry point)
+[LOOP] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 step=1 planned_action=call_qwen model=qwen2.5:1.5b-instruct tool=None
+[INFERENCE_CLIENT] -> model=qwen2.5:1.5b-instruct url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:61855 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61870 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61886 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61902 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61918 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61936 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61951 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61968 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61987 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61989 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen2.5:1.5b-instruct response_preview='Ensuring the highest levels of chemical storage and handling in refineries is essential for maintaining both operational'
+[LOOP] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 model=qwen2.5:1.5b-instruct response_preview='Ensuring the highest levels of chemical storage and handling in refineries is essential for maintaining both operational' tokens=prompt:36/completion:28
+[STATE] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 step=1 action=call_qwen tool=None model=qwen2.5:1.5b-instruct status=ok
+[PLANNER] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 qwen observed -> finalize
+[LOOP] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 step=2 planned_action=finalize model=None tool=None
+[LOOP] task_id=2d99b43e-69d0-49ce-9586-f9a4feedab88 END status=completed final_model=qwen2.5:1.5b-instruct steps_run=1
+INFO:     127.0.0.1:61993 - "GET /api/task-status/2d99b43e-69d0-49ce-9586-f9a4feedab88 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "GET /styles.css?v=20260914 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64173 - "GET /app.js?v=20260914 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "GET /user.js?v=20260915 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49669 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:49669 - "POST /api/chat/8a831bda-4abc-4173-8ff2-e53b3e2c6891/message HTTP/1.1" 200 OK
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 START prompt='hi' has_file=False chat_id='8a831bda-4abc-4173-8ff2-e53b3e2c6891'
+[ROUTER] chat_id='8a831bda-4abc-4173-8ff2-e53b3e2c6891' -> task_type=chat first_model=qwen2.5:1.5b-instruct (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 step0 -> call_tool(search_docs) chat_id='8a831bda-4abc-4173-8ff2-e53b3e2c6891' top_k=4 (chat-scoped KB retrieval)
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 calling tool=search_docs args={'query': 'hi', 'top_k': 4, 'chat_id': '8a831bda-4abc-4173-8ff2-e53b3e2c6891'}
+[TOOLS] search_docs query='hi' top_k=4 chat_id='8a831bda-4abc-4173-8ff2-e53b3e2c6891'
+[docsearch] opening persistent Chroma index at: C:\Users\Guransh Rally\smartindiahackathon\tools\chroma_db
+INFO:     127.0.0.1:49669 - "GET /api/task-status/b987db9d-5aac-4669-8a04-ae34d1970d62 HTTP/1.1" 200 OK
+[docsearch] chat KB collection 'chat_kb' loaded, 0 chunk(s) already persisted on disk
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 step=2 planned_action=call_qwen model=qwen2.5:1.5b-instruct tool=None
+[INFERENCE_CLIENT] -> model=qwen2.5:1.5b-instruct url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:49669 - "GET /api/task-status/b987db9d-5aac-4669-8a04-ae34d1970d62 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen2.5:1.5b-instruct response_preview='Hello! How can I assist you today? Is there something specific about what "it" refers to or any particular topic related'
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 model=qwen2.5:1.5b-instruct response_preview='Hello! How can I assist you today? Is there something specific about what "it" refers to or any particular topic related' tokens=prompt:132/completion:69
+[STATE] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 step=2 action=call_qwen tool=None model=qwen2.5:1.5b-instruct status=ok
+[PLANNER] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 qwen observed -> finalize
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=b987db9d-5aac-4669-8a04-ae34d1970d62 END status=completed final_model=qwen2.5:1.5b-instruct steps_run=2
+INFO:     127.0.0.1:49669 - "GET /api/task-status/b987db9d-5aac-4669-8a04-ae34d1970d62 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53585 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53585 - "GET /styles.css?v=20260918 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55682 - "GET /app.js?v=20260917 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53585 - "GET /user.js?v=20260918 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55682 - "GET /login.html?next= HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53585 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55682 - "GET /styles.css?v=20260917 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49258 - "GET /signup.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49258 - "GET /styles.css?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:49258 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63730 - "GET /index.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63730 - "GET /styles.css?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63730 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63730 - "GET /user.js?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63730 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63730 - "GET /api/kb/list?user_id=test HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58502 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:58502 - "GET /styles.css?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52989 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:58502 - "GET /user.js?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:58502 - "GET /login.html?next=index.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58502 - "GET /styles.css?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:58502 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:64502 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64502 - "GET /api/kb/list?user_id=test HTTP/1.1" 404 Not Found
