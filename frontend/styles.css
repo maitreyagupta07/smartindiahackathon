@@ -566,6 +566,25 @@ tbody td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 .task-meta-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); }
 .task-meta-item.task-meta-gap { opacity: 0.7; cursor: help; }
 
+/* ---- "Show thinking" step trace under an assistant answer ---- */
+.think-trace { margin-top: 2px; font-size: 11.5px; color: var(--text-muted); }
+.think-trace summary {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; list-style: none;
+  padding: 3px 0; user-select: none;
+}
+.think-trace summary::-webkit-details-marker { display: none; }
+.think-step-list { list-style: none; margin: 6px 0 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; background: var(--elevated-surface); border: 1px solid var(--border-subtle); border-radius: 8px; }
+.think-step { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; }
+.think-step-dot { width: 15px; height: 15px; border-radius: 999px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; background: var(--border-subtle); color: var(--text-muted); margin-top: 1px; }
+.think-step-dot.ok { background: var(--success); color: #fff; }
+.think-step-dot.err { background: var(--error); color: #fff; }
+.think-step-label { color: var(--text-secondary); }
+.think-step-tokens { color: var(--text-muted); }
+.think-step-err { color: var(--error); }
+
+/* ---- "AI can make mistakes" disclaimer under the composer ---- */
+.ai-disclaimer { text-align: center; font-size: 10.5px; color: var(--text-muted); margin-top: 8px; opacity: 0.8; }
+
 /* ---- Notification bell ---- */
 .notif-wrap { position: relative; }
 .icon-btn.active { color: var(--accent); }

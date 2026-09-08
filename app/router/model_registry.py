@@ -2,11 +2,20 @@
 Single source of truth for model name strings.
 Per contract §2.5 — do not hardcode these anywhere else in /agent.
 If Person A changes a model name, only this file should need updating.
-"""
 
-TEXT_MODEL = "qwen2.5:1.5b-instruct"
-VISION_MODEL = "moondream"
-LORA_ADAPTER = "approval-note-lora"  # Person A's fine-tuned adapter for approval-note file generation
+Values are sourced from config.json's "models" block (falling back to the
+defaults below if a key is missing/null) — this used to be a dead block:
+config.py loaded it into a MODELS dict, but nothing ever read that dict, so
+editing config.json's models.text_model/vision_model/lora_adapter had zero
+effect and only editing THIS file's literals actually changed anything.
+Reading it here makes config.json the real, live single source of truth
+again, exactly like ports.backend/inference already are for config.py.
+"""
+from ..storage.config import MODELS as _CONFIG_MODELS
+
+TEXT_MODEL = _CONFIG_MODELS.get("text_model") or "qwen2.5:1.5b-instruct"
+VISION_MODEL = _CONFIG_MODELS.get("vision_model") or "moondream"
+LORA_ADAPTER = _CONFIG_MODELS.get("lora_adapter") or "approval-note-lora"  # Person A's fine-tuned adapter for approval-note file generation
 
 TASK_TYPE_TO_MODEL = {
     "vision": VISION_MODEL,

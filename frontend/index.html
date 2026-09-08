@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign AI Workbench</title>
-<link rel="stylesheet" href="styles.css?v=20260908">
+<link rel="stylesheet" href="styles.css?v=20260909">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -100,6 +100,7 @@
           <input id="composer-input-idle" type="text" placeholder="Ask a question, or attach a file...">
           <button class="composer-btn composer-send" id="composer-send-idle" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
         </div>
+        <div class="ai-disclaimer">AI models can make mistakes. Verify important information.</div>
       </div>
     </div>
 
@@ -120,6 +121,7 @@
           <input id="composer-input" type="text" placeholder="Ask a follow-up, or attach a file...">
           <button class="composer-btn composer-send" id="composer-send" title="Send"><iconify-icon icon="lucide:send"></iconify-icon></button>
         </div>
+        <div class="ai-disclaimer">AI models can make mistakes. Verify important information.</div>
       </div>
     </div>
 
@@ -178,8 +180,8 @@
   </div>
 </div>
 
-<script src="app.js?v=20260908"></script>
-<script src="user.js?v=20260908"></script>
+<script src="app.js?v=20260909"></script>
+<script src="user.js?v=20260909"></script>
 <script src="jerry.js?v=20260907"></script>
 <script>
   document.getElementById('sidebar-user-id').textContent = Store.USER_ID;

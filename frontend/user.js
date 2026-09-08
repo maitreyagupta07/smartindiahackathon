@@ -319,17 +319,51 @@ function renderSources(sources) {
 }
 
 /** Task ID / model / duration / token-usage row shown under a finished task.
- *  Token usage is intentionally always "not exposed" — see README's Backend
- *  Contract Gap note. This never fabricates a number. */
+ *  Token usage is the real total from Ollama's own response (prompt_eval_count
+ *  + eval_count, summed across every model call this task made) — never
+ *  estimated. Falls back to "not available" only for older/demo data that
+ *  predates this field. */
 function taskMetaRow(task) {
   const duration = timeAgoOrDuration(task.started_at, task.completed_at);
+  const usage = task.token_usage;
+  const hasTokens = usage && typeof usage.total_tokens === 'number';
+  const tokensLabel = hasTokens
+    ? `${usage.total_tokens} tok (${usage.prompt_tokens ?? 0} in / ${usage.completion_tokens ?? 0} out)`
+    : 'not available';
   return `
     <div class="task-meta-row">
       <span class="task-meta-item mono" title="Task ID"><iconify-icon icon="lucide:hash" style="font-size:11px"></iconify-icon>${escapeHtml(task.task_id.slice(0, 8))}</span>
       ${modelsUsedList(task).length ? `<span class="task-meta-item mono" title="Model(s) used, in call order"><iconify-icon icon="lucide:cpu" style="font-size:11px"></iconify-icon>${escapeHtml(modelsUsedList(task).join(' → '))}</span>` : ''}
       <span class="task-meta-item mono" title="Duration"><iconify-icon icon="lucide:timer" style="font-size:11px"></iconify-icon>${duration}</span>
-      <span class="task-meta-item mono task-meta-gap" title="The current backend contract does not expose per-task token usage — see README."><iconify-icon icon="lucide:coins" style="font-size:11px"></iconify-icon>Tokens: not exposed</span>
-    </div>`;
+      <span class="task-meta-item mono ${hasTokens ? '' : 'task-meta-gap'}" title="${hasTokens ? 'Real token usage reported by Ollama for this task' : 'Not available for this task'}"><iconify-icon icon="lucide:coins" style="font-size:11px"></iconify-icon>${escapeHtml(tokensLabel)}</span>
+    </div>
+    ${thinkingStepsHtml(task)}`;
+}
+
+/** Collapsible "Thinking" trace — the real per-step plan→act→observe record
+ *  (task.steps, from app/agent/state.py's step_summary) rendered inline
+ *  under the answer, so the reasoning is visible without opening the
+ *  execution graph. Absent entirely for older/demo data with no steps. */
+function thinkingStepsHtml(task) {
+  if (!Array.isArray(task.steps) || !task.steps.length) return '';
+  const rows = task.steps.map((s, i) => {
+    const isModel = s.action === 'call_qwen' || s.action === 'call_moondream';
+    const label = isModel
+      ? `${s.action === 'call_moondream' ? 'Vision' : 'Text'} call · ${escapeHtml(s.model_used || '')}`
+      : s.action === 'call_tool'
+        ? `${TOOL_LABELS[s.tool_name] || escapeHtml(s.tool_name || 'tool')}`
+        : escapeHtml(s.action || 'step');
+    const statusIcon = s.status === 'ok' ? 'lucide:check' : s.status === 'error' ? 'lucide:x' : 'lucide:minus';
+    const statusCls = s.status === 'ok' ? 'ok' : s.status === 'error' ? 'err' : '';
+    const tokens = (typeof s.prompt_tokens === 'number' || typeof s.completion_tokens === 'number')
+      ? ` <span class="think-step-tokens">(${s.prompt_tokens ?? 0}+${s.completion_tokens ?? 0} tok)</span>` : '';
+    return `<li class="think-step"><span class="think-step-dot ${statusCls}"><iconify-icon icon="${statusIcon}"></iconify-icon></span><span class="think-step-label">${i + 1}. ${label}${tokens}</span>${s.error ? `<span class="think-step-err">${escapeHtml(s.error)}</span>` : ''}</li>`;
+  }).join('');
+  return `
+    <details class="think-trace">
+      <summary><iconify-icon icon="lucide:brain-circuit" style="font-size:12px"></iconify-icon>Show thinking (${task.steps.length} step${task.steps.length === 1 ? '' : 's'})</summary>
+      <ol class="think-step-list">${rows}</ol>
+    </details>`;
 }
 
 /* ============================================================
@@ -912,15 +946,20 @@ function openDrawerFor(nodeKey, state) {
       desc = status === 'pending' ? '' : models.length > 1
         ? `MULTIPLE models were used for this task, in this order — a real multi-step chain, not a single call.`
         : 'Selects which local model handles the request.';
+      const tokenUsageLabel = (t.token_usage && typeof t.token_usage.total_tokens === 'number')
+        ? `${t.token_usage.total_tokens} tok (${t.token_usage.prompt_tokens ?? 0} in / ${t.token_usage.completion_tokens ?? 0} out) — real, from Ollama`
+        : 'Not available for this task';
       if (state.modelSteps.length) {
-        // Real per-call trace: exact model + action + status for every call made.
+        // Real per-call trace: exact model + action + status + real per-call
+        // token usage (from Ollama's own prompt_eval_count/eval_count).
         kv = state.modelSteps.map((s, i) => ({
           k: `${i + 1}. ${s.action === 'call_moondream' ? 'Vision' : 'Text'} call`,
-          v: `${s.model_used} · ${s.status === 'ok' ? 'succeeded' : 'failed'}`,
+          v: `${s.model_used} · ${s.status === 'ok' ? 'succeeded' : 'failed'}` +
+            ((typeof s.prompt_tokens === 'number' || typeof s.completion_tokens === 'number') ? ` · ${s.prompt_tokens ?? 0}+${s.completion_tokens ?? 0} tok` : ''),
         }));
-        kv.push({ k: 'Token Usage', v: 'Not exposed by current backend contract' });
+        kv.push({ k: 'Total Token Usage', v: tokenUsageLabel });
       } else if (models.length) {
-        kv = [{ k: 'Model Selected', v: models.join(' → ') }, { k: 'Status', v: 'Resolved' }, { k: 'Token Usage', v: 'Not exposed by current backend contract' }];
+        kv = [{ k: 'Model Selected', v: models.join(' → ') }, { k: 'Status', v: 'Resolved' }, { k: 'Total Token Usage', v: tokenUsageLabel }];
       } else if (status === 'active') kv = [{ k: 'Status', v: 'Resolving…' }];
     } else if (nodeKey === 'tool') {
       desc = status === 'na' ? 'Confirmed from the real execution trace: no tool was called for this result.' : status === 'pending' ? '' : `${state.toolCalls.length} tool call${state.toolCalls.length === 1 ? '' : 's'} made during this task, in order.`;
