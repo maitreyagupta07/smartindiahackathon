@@ -101,12 +101,41 @@ CODE_EXECUTION_SIGNALS = (
     ("run the following", 3, "contextual_phrase"),
     ("write a program", 3, "contextual_phrase"),
     ("write a script", 3, "contextual_phrase"),
+    # A plain "give/write me code to X" / "code for X" never says "run" or
+    # "execute" at all, but is exactly as much a code-execution request as
+    # "write a program that..." — without these, a real request like "give
+    # me cpp code to reverse a linked list" scores 0 across every task
+    # type, falls back to plain "text-generation", and (inside an ongoing
+    # chat) gets silently upgraded to task_type="chat" by router.py —
+    # which then grounds the answer in THIS CHAT'S Knowledge Base/history
+    # instead of writing code, producing an answer about whatever else was
+    # discussed earlier in the chat before it gets to the code. Observed
+    # live: asking for this after a "summarize WW2" document-generation
+    # turn in the same chat produced a stray WW2-grounded preamble before
+    # the code. Fixed at the classification stage, not by special-casing
+    # code requests inside the chat path — the request was never actually
+    # a knowledge-base question to begin with.
+    ("give me the code", 5, "contextual_phrase"),
+    ("give me code", 5, "contextual_phrase"),
+    ("code to ", 4, "contextual_phrase"),
+    ("code for ", 4, "contextual_phrase"),
+    ("write code", 4, "contextual_phrase"),
+    ("write me code", 4, "contextual_phrase"),
     ("execute", 3, "action_verb"),
     ("python", 3, "tool_term"),
+    ("c++", 3, "tool_term"),
+    ("cpp", 3, "tool_term"),
+    ("java", 3, "tool_term"),
+    ("javascript", 3, "tool_term"),
+    ("typescript", 3, "tool_term"),
     ("script", 2, "tool_term"),
     ("program", 2, "tool_term"),
     ("algorithm", 2, "tool_term"),
+    ("function that", 2, "tool_term"),
+    ("linked list", 2, "domain_term"),
+    ("binary search", 2, "domain_term"),
     ("compute", 2, "action_verb"),
+    ("implement", 1, "weak_domain_verb"),  # ambiguous alone ("implement the new policy")
     ("run", 1, "action_verb"),           # very ambiguous alone ("run a test")
     ("calculate", 1, "weak_domain_verb"),  # ambiguous alone — see module docstring
     ("computation", 1, "weak_domain_verb"),
