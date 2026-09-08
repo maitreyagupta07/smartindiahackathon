@@ -73,7 +73,11 @@ from typing import Literal, Optional
 
 from .state import TaskState
 from ..router.model_registry import TEXT_MODEL, VISION_MODEL, LORA_ADAPTER, is_approval_note_request
-from ..router.classifier import FILE_FORMAT_KEYWORDS
+from ..router.classifier import (
+    FILE_FORMAT_KEYWORDS,
+    looks_like_comparison as _looks_like_comparison,
+    looks_like_transcript as _looks_like_transcript,
+)
 from ..tools.pdf_extract import extract_text_from_pdf, is_pdf
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
@@ -310,9 +314,16 @@ def _build_filegen_content_prompt(original_prompt: str, verified_data: Optional[
         f"alter, or shorten them):\n{verified_data}\n\n"
         if verified_data else ""
     )
+    if _looks_like_transcript(original_prompt):
+        guidance_block = f"Follow this structure — one JSON section per item:\n{_transcript_instructions()}\n\n"
+    elif _looks_like_comparison(original_prompt):
+        guidance_block = f"Follow this structure — one JSON section per numbered item:\n{_comparison_instructions()}\n\n"
+    else:
+        guidance_block = ""
     return (
         "You are preparing structured content for a generated file.\n"
         f"User request: \"{original_prompt}\"\n\n"
+        f"{guidance_block}"
         f"{data_block}"
         "Respond with ONLY valid JSON (no markdown fences, no commentary) matching "
         "exactly this schema:\n"
@@ -537,16 +548,32 @@ def _build_code_result_prompt(original_prompt: str, tool_observation: dict) -> s
 def _build_docsearch_prompt(original_prompt: str, tool_observation: dict) -> str:
     results = tool_observation.get("results", [])
     if not results:
-        passages = "(no matching passages found in the local document store)"
-    else:
-        passages = "\n\n".join(
-            f"[Source: {r.get('source', 'unknown')}] {r.get('text', '')}" for r in results
+        return (
+            f"A local knowledge-base search for this request returned no matching "
+            f"passages: \"{original_prompt}\"\n\n"
+            f"Reply with exactly: \"That information is not in the knowledge base.\" "
+            f"Do not guess or use outside knowledge."
         )
+
+    passages = "\n\n".join(
+        f"[Passage {i}] (source: {r.get('source', 'unknown')}"
+        + (f", page {r['page']}" if r.get("page") else "")
+        + f")\n{r.get('text', '')}"
+        for i, r in enumerate(results, start=1)
+    )
     return (
-        f"Using ONLY the following passages retrieved from the local document store, "
-        f"answer this request: \"{original_prompt}\"\n\n"
-        f"---\n{passages}\n---\n\n"
-        f"If the passages don't contain enough information, say so explicitly rather than guessing."
+        "You are answering strictly from the plant knowledge base. Use ONLY the "
+        "passages below — do not add outside knowledge, do not estimate, and do "
+        "not fill gaps.\n\n"
+        f"QUESTION: \"{original_prompt}\"\n\n"
+        f"RETRIEVED PASSAGES:\n---\n{passages}\n---\n\n"
+        "Instructions:\n"
+        "- Answer directly and specifically. If the question asks for a value, ID, "
+        "date, name, or rule, quote it exactly as written in the passages.\n"
+        "- Name the source document your answer comes from (e.g. \"per "
+        "SOP-PTW-01\" or \"from employee_directory.txt\").\n"
+        "- If the passages do not contain the answer, reply exactly: \"That "
+        "information is not in the knowledge base.\" — nothing more."
     )
 
 
@@ -561,6 +588,60 @@ def _format_history(history: Optional[list]) -> str:
         if content:
             lines.append(f"{role}: {content}")
     return "\n".join(lines).strip()
+
+
+# ---------------------------------------------------------------------------
+# Document comparison + meeting-transcript recognition (multi-doc / transcript
+# workflows). These do not introduce a new task_type — a comparison request
+# runs through the normal chat / doc-search / document-generation flow; these
+# helpers just let the planner shape the Qwen prompt for the specific job so
+# the answer is a structured diff / a set of minutes rather than a vague
+# summary. Everything stays grounded in retrieved passages or the pasted text.
+# ---------------------------------------------------------------------------
+
+def _comparison_instructions() -> str:
+    return (
+        "This is a DOCUMENT COMPARISON request. Work only from the material "
+        "provided (retrieved passages and/or pasted text). Produce these "
+        "sections, each as a short list; write \"None found\" if a section is "
+        "empty:\n"
+        "1. Changed values / clauses — show old -> new.\n"
+        "2. Additions — present in one document, absent in the other.\n"
+        "3. Removals — dropped from the later document.\n"
+        "4. Contradictions or inconsistencies between the documents.\n"
+        "5. Possible operational / business impact of these differences.\n"
+        "6. Recommended follow-up actions.\n"
+        "Name the documents you are comparing. Do not invent differences that "
+        "the provided text does not support."
+    )
+
+
+def _transcript_instructions() -> str:
+    return (
+        "This is a MEETING-TRANSCRIPT processing request. Work only from the "
+        "transcript text provided. Produce these sections:\n"
+        "- Attendees — only if named in the transcript, else \"Not stated\".\n"
+        "- Summary — 3-6 bullets of what was discussed.\n"
+        "- Decisions — each decision on its own line, else \"None recorded\".\n"
+        "- Action Items — one per line as: owner - action - due date (use "
+        "\"unassigned\" / \"no date\" when the transcript does not say).\n"
+        "- Unresolved Issues — open questions with no decision, else \"None\".\n"
+        "Do not add commitments, owners, or dates that are not in the transcript."
+    )
+
+
+def _build_transcript_prompt(original_prompt: str) -> str:
+    return (
+        f"{_transcript_instructions()}\n\n"
+        f"REQUEST / TRANSCRIPT:\n\"{original_prompt}\""
+    )
+
+
+def _build_comparison_prompt(original_prompt: str) -> str:
+    return (
+        f"{_comparison_instructions()}\n\n"
+        f"REQUEST / DOCUMENTS:\n\"{original_prompt}\""
+    )
 
 
 def _build_chat_prompt(question: str, history: Optional[list], tool_observation: dict) -> str:
@@ -590,13 +671,21 @@ def _build_chat_prompt(question: str, history: Optional[list], tool_observation:
 
     convo = _format_history(history) or "(no earlier conversation in this chat)"
 
+    if _looks_like_transcript(question):
+        task_block = f"\n\nTASK GUIDANCE:\n{_transcript_instructions()}"
+    elif _looks_like_comparison(question):
+        task_block = f"\n\nTASK GUIDANCE:\n{_comparison_instructions()}"
+    else:
+        task_block = ""
+
     return (
         "You are an assistant answering questions using the user's uploaded "
         "Knowledge Base and the conversation so far in this chat. Use the "
         "recent conversation to resolve references such as \"it\", \"they\", "
         "\"this\", or \"that\". Prefer the Knowledge Base passages for facts; "
         "if they do not contain the answer, say so plainly instead of "
-        "guessing.\n\n"
+        "guessing."
+        f"{task_block}\n\n"
         f"RELEVANT KNOWLEDGE BASE:\n{kb_block}\n\n"
         f"RECENT CONVERSATION:\n{convo}\n\n"
         f"CURRENT QUESTION:\n{question}"
@@ -667,25 +756,31 @@ def decide_next_step(state: TaskState) -> NextStep:
             )
 
         if state.task_type == "doc-search":
-            print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(search_docs)")
+            # Comparison questions need chunks from more than one document, so
+            # widen retrieval for them; a plain fact lookup stays tight.
+            top_k = 8 if _looks_like_comparison(state.prompt) else 5
+            print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(search_docs) top_k={top_k}")
             return NextStep(
                 action="call_tool",
                 tool_name="search_docs",
-                tool_args={"query": state.prompt, "top_k": 3},
+                tool_args={"query": state.prompt, "top_k": top_k},
             )
 
         if state.task_type == "chat":
             # Chat flow: retrieve from THIS chat's Knowledge Base only
             # (chat_id filter enforced by the tools service), then answer
             # with the retrieved chunks + recent conversation context.
+            chat_top_k = 8 if (
+                _looks_like_comparison(state.prompt) or _looks_like_transcript(state.prompt)
+            ) else 4
             print(
                 f"[PLANNER] task_id={state.task_id} step0 -> call_tool(search_docs) "
-                f"chat_id={state.chat_id!r} (chat-scoped KB retrieval)"
+                f"chat_id={state.chat_id!r} top_k={chat_top_k} (chat-scoped KB retrieval)"
             )
             return NextStep(
                 action="call_tool",
                 tool_name="search_docs",
-                tool_args={"query": state.prompt, "top_k": 4, "chat_id": state.chat_id},
+                tool_args={"query": state.prompt, "top_k": chat_top_k, "chat_id": state.chat_id},
             )
 
         if state.task_type == "document-generation":
@@ -739,6 +834,18 @@ def decide_next_step(state: TaskState) -> NextStep:
         # kind of request would carry, just delivered as plain text instead
         # of written to a file. Anything else keeps the original single
         # free-form Qwen call.
+        # A pasted meeting transcript or an inline document-comparison request
+        # (no chat_id, so it can't go through the chat-KB flow) is shaped here
+        # so the single Qwen call returns structured minutes / a structured
+        # diff instead of loose prose. Still one plain call_qwen — no new
+        # task_type, no extra tool.
+        if _looks_like_transcript(state.prompt):
+            print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={TEXT_MODEL} (transcript processing)")
+            return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=_build_transcript_prompt(state.prompt))
+        if _looks_like_comparison(state.prompt):
+            print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={TEXT_MODEL} (inline document comparison)")
+            return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=_build_comparison_prompt(state.prompt))
+
         if is_approval_note_request(state.prompt) and LORA_ADAPTER:
             print(
                 f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={LORA_ADAPTER} "
@@ -885,8 +992,15 @@ def decide_next_step(state: TaskState) -> NextStep:
                     f"({len(state.sources)} source(s)) -> chaining to call_qwen with conversation context"
                 )
                 return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=chat_prompt)
+            # Expose which corpus document(s) grounded the answer so the UI's
+            # existing "Sources" block can show them (same shape the chat flow
+            # already uses).
+            state.sources = _sources_from_results(last.observation or {})
             reasoning_prompt = _build_docsearch_prompt(state.prompt, last.observation or {})
-            print(f"[PLANNER] task_id={state.task_id} search_docs observed -> chaining to call_qwen")
+            print(
+                f"[PLANNER] task_id={state.task_id} search_docs observed "
+                f"({len(state.sources)} source(s)) -> chaining to call_qwen"
+            )
             return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
 
         if last.tool_name == "generate_file":

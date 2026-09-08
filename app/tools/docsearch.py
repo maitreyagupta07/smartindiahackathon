@@ -10,6 +10,7 @@ embedding + storage. Everything here is local-only — no external API calls,
 consistent with the air-gapped requirement.
 """
 import hashlib
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,6 +106,54 @@ def _chunk_text(text: str, chunk_size: int = 800, overlap: int = 100):
         chunks.append(text[start:end])
         start += chunk_size - overlap
     return [c.strip() for c in chunks if c.strip()]
+
+
+def _smart_chunk(text: str, target_size: int = 900):
+    """
+    Block-aware chunking for the on-disk corpus. A blind fixed-width window
+    (``_chunk_text``) routinely splits a single record ("Employee ID: ..."
+    on one side of the boundary, "Access Level: ..." on the other) or an SOP
+    clause across two chunks, so a query for one exact field retrieves a
+    fragment that is missing the value. This keeps every blank-line-separated
+    block whole and greedily packs consecutive blocks up to ``target_size``,
+    so a full record / clause lands in one retrievable chunk. A single block
+    larger than ``target_size`` falls back to the sliding window so nothing
+    is dropped.
+    """
+    blocks = [b.strip() for b in re.split(r"\n\s*\n", text) if b.strip()]
+    if not blocks:
+        return _chunk_text(text)
+
+    chunks: list[str] = []
+    current = ""
+    for block in blocks:
+        if len(block) > target_size:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(_chunk_text(block))
+            continue
+        candidate = f"{current}\n\n{block}" if current else block
+        if len(candidate) > target_size and current:
+            chunks.append(current)
+            current = block
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return [c.strip() for c in chunks if c.strip()]
+
+
+# Tokens worth an exact-match boost: equipment tags (V-204), employee IDs
+# (EMP-1042), document/policy IDs (SOP-PTW-01, POL-HR-04, AN-2024-0417).
+# Retrieval for these is where a small embedding model is weakest and where
+# a user most expects a precise answer, so a verbatim hit in a candidate
+# chunk lifts it above a merely semantically-near one.
+_IDENTIFIER_RE = re.compile(r"\b[A-Za-z]{1,6}[-–]?\d{2,}[A-Za-z0-9\-]*\b")
+
+
+def _identifier_tokens(query: str) -> set[str]:
+    return {m.group(0).lower() for m in _IDENTIFIER_RE.finditer(query or "")}
 
 
 def _discover_files() -> list[Path]:
@@ -238,7 +287,7 @@ def _sync_corpus(collection):
         else:
             print(f"[docsearch]   {path.name!r} is new (hash={content_hash}) -> indexing")
 
-        file_chunks = _chunk_text(text)
+        file_chunks = _smart_chunk(text)
         print(f"[docsearch]   {path.name!r} chunked into {len(file_chunks)} chunk(s)")
         for i, chunk in enumerate(file_chunks):
             ids.append(f"{path.name}::{content_hash}::{i}")
@@ -298,9 +347,15 @@ def search_docs(query: str, top_k: int = 3) -> list[dict]:
         return []
 
     top_k = max(1, min(top_k, count))
-    result = collection.query(query_texts=[query], n_results=top_k)
+    # Over-fetch, then re-rank locally so an exact identifier match (an
+    # employee ID, an equipment tag, a document ID) can be pulled to the top
+    # even if the embedding model ranked a semantically-similar-but-wrong
+    # chunk higher. Purely local, deterministic, no extra model call.
+    fetch_k = min(count, max(top_k * 3, top_k + 4))
+    result = collection.query(query_texts=[query], n_results=fetch_k)
 
-    out = []
+    wanted_ids = _identifier_tokens(query)
+    scored = []
     docs = result.get("documents", [[]])[0]
     metas = result.get("metadatas", [[]])[0]
     dists = result.get("distances", [[]])[0]
@@ -308,10 +363,21 @@ def search_docs(query: str, top_k: int = 3) -> list[dict]:
         # Chroma returns a distance (lower = closer); convert to a
         # 0-1 "similarity-ish" score for the contract's `score` field.
         score = 1.0 / (1.0 + dist) if dist is not None else 0.0
+        lexical_bonus = 0.0
+        if wanted_ids:
+            lowered = (text or "").lower()
+            hits = sum(1 for tok in wanted_ids if tok in lowered)
+            if hits:
+                lexical_bonus = 0.5 + 0.1 * hits
+        scored.append((score + lexical_bonus, round(float(score), 4), text, meta))
+
+    scored.sort(key=lambda r: r[0], reverse=True)
+    out = []
+    for _rank_score, score, text, meta in scored[:top_k]:
         out.append({
             "text": text,
             "source": (meta or {}).get("source", "unknown"),
-            "score": round(float(score), 4),
+            "score": score,
         })
     return out
 
@@ -432,25 +498,38 @@ def search_chat_docs(query: str, chat_id: str, top_k: int = 4) -> list[dict]:
         return []
 
     top_k = max(1, min(top_k, count))
+    fetch_k = min(count, max(top_k * 3, top_k + 4))
     result = collection.query(
         query_texts=[query],
-        n_results=top_k,
+        n_results=fetch_k,
         where={"chat_id": chat_id},
     )
 
-    out = []
+    wanted_ids = _identifier_tokens(query)
+    scored = []
     docs = result.get("documents", [[]])[0]
     metas = result.get("metadatas", [[]])[0]
     dists = result.get("distances", [[]])[0]
     for text, meta, dist in zip(docs, metas, dists):
         meta = meta or {}
         score = 1.0 / (1.0 + dist) if dist is not None else 0.0
+        lexical_bonus = 0.0
+        if wanted_ids:
+            lowered = (text or "").lower()
+            hits = sum(1 for tok in wanted_ids if tok in lowered)
+            if hits:
+                lexical_bonus = 0.5 + 0.1 * hits
+        scored.append((score + lexical_bonus, round(float(score), 4), text, meta))
+
+    scored.sort(key=lambda r: r[0], reverse=True)
+    out = []
+    for _rank_score, score, text, meta in scored[:top_k]:
         out.append({
             "text": text,
             "source": meta.get("filename") or meta.get("source", "unknown"),
             "page": meta.get("page"),
             "document_id": meta.get("document_id"),
-            "score": round(float(score), 4),
+            "score": score,
         })
     return out
 

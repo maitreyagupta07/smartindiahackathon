@@ -131,6 +131,29 @@ DOC_SEARCH_SIGNALS = (
     ("inspection report", 3, "domain_term"),
     ("inspection reports", 3, "domain_term"),
     ("inspection records", 2, "domain_term"),
+    # Structured-record lookups against the local corpus (employee directory,
+    # policy, asset register). These make "what is the employee ID of ...",
+    # "what does POL-HR-04 say about ...", "when is V-204's next inspection
+    # due" retrieve the actual record instead of falling through to a generic
+    # text-generation answer.
+    ("employee id", 5, "contextual_phrase"),
+    ("emp id", 4, "contextual_phrase"),
+    ("employee record", 4, "contextual_phrase"),
+    ("employee directory", 5, "contextual_phrase"),
+    ("reporting manager", 3, "domain_term"),
+    ("date of joining", 3, "domain_term"),
+    ("access level", 3, "domain_term"),
+    ("asset register", 5, "contextual_phrase"),
+    ("tag number", 3, "domain_term"),
+    ("tag no", 3, "domain_term"),
+    ("next inspection due", 4, "domain_term"),
+    ("design pressure", 3, "domain_term"),
+    ("design temp", 3, "domain_term"),
+    ("custodian", 2, "domain_term"),
+    ("policy", 2, "domain_term"),
+    ("leave entitlement", 4, "contextual_phrase"),
+    ("according to the", 2, "domain_term"),
+    ("as per the", 2, "domain_term"),
 )
 
 DOCUMENT_GENERATION_SIGNALS = (
@@ -179,6 +202,25 @@ MULTI_STEP_CONNECTORS = (
 
 _ARITHMETIC_EXPRESSION_RE = re.compile(r"\d+\s*[\+\-\*/^]\s*\d+")
 _CODE_FENCE_RE = re.compile(r"```")
+
+# A document/record identifier from the local corpus: SOP-PTW-01, MAN-INSP-02,
+# POL-HR-04, HR-DIR-01, ENG-AR-05, AN-2024-0417, EMP-1042, IT-CAT-2026, ...
+_RECORD_ID_RE = re.compile(
+    r"\b(?:sop|man|pol|hr|eng|it|an|emp|doc)-[a-z0-9]+(?:-[a-z0-9]+)*\b", re.IGNORECASE
+)
+# A plant equipment tag: V-101, V-204, P-220A, E-215, TK-330.
+_EQUIPMENT_TAG_RE = re.compile(r"\b[a-z]{1,2}-\d{2,3}[a-z]?\b", re.IGNORECASE)
+# "Question / lookup" framing — used to gate the equipment-tag boost so that
+# "draft an approval note for the V-204 finding" (an action, not a lookup)
+# is NOT pulled into doc-search, while "what is V-204's next inspection due?"
+# is.
+_LOOKUP_FRAMING_RE = re.compile(
+    r"\b(what|which|who|whom|when|where|how many|how much|list|show|tell me|"
+    r"look up|value|detail|details|specif\w*|state[sd]?|says?|mention\w*|"
+    r"according to|as per|due|custodian|entitlement|email|id of|id for|"
+    r"details of|details for|record for|record of)\b",
+    re.IGNORECASE,
+)
 
 
 def _compile_phrase(phrase: str) -> re.Pattern:
@@ -260,6 +302,18 @@ def classify(prompt: str, file_mime_type: Optional[str]) -> ClassificationResult
         scores["code-execution"] += 5
         matches_by_type["code-execution"].append(("<code fence>", 5, "numeric_evidence", 0))
 
+    # A corpus document/record ID in the prompt ("what does SOP-PTW-01 say
+    # about fire watch", "employee EMP-1042") is strong evidence of a
+    # knowledge-base lookup.
+    if _RECORD_ID_RE.search(prompt):
+        scores["doc-search"] += 4
+        matches_by_type["doc-search"].append(("<corpus record id>", 4, "identifier_evidence", 0))
+    # An equipment tag only counts toward doc-search when the sentence is
+    # framed as a question/lookup — never when it's an action request.
+    if _EQUIPMENT_TAG_RE.search(prompt) and _LOOKUP_FRAMING_RE.search(prompt):
+        scores["doc-search"] += 3
+        matches_by_type["doc-search"].append(("<equipment tag lookup>", 3, "identifier_evidence", 0))
+
     qualifying = {t: s for t, s in scores.items() if s >= MIN_CONFIDENT_SCORE}
 
     has_connector = any(c in lowered for c in MULTI_STEP_CONNECTORS)
@@ -299,6 +353,41 @@ def classify(prompt: str, file_mime_type: Optional[str]) -> ClassificationResult
 def classify_task(prompt: str, file_mime_type: str | None) -> str:
     """Backward-compatible: every existing caller just wants the task_type string."""
     return classify(prompt, file_mime_type).task_type
+
+
+# ---------------------------------------------------------------------------
+# Document-comparison / meeting-transcript intent detection.
+#
+# These do NOT create a new task_type — they are consumed by the router (to
+# keep a comparison/transcript request inside a chat on the chat-KB flow
+# instead of a corpus-wide doc-search) and by the planner (to shape the Qwen
+# prompt into a structured diff / minutes). Keyword/regex only, no model call.
+# ---------------------------------------------------------------------------
+
+_COMPARISON_RE = re.compile(
+    r"\b(compare|comparison|diff(?:erence)?s?|what'?s? different|reconcile|"
+    r"inconsisten\w*|contradict\w*|discrepanc\w*|redline|red-line|delta|"
+    r"versus|vs\.?)\b",
+    re.IGNORECASE,
+)
+_TRANSCRIPT_RE = re.compile(
+    r"\b(transcript|meeting notes|meeting minutes|minutes of (?:the )?meeting|"
+    r"prepare (?:the )?minutes|\bmom\b|call notes|standup notes|action items|"
+    r"decisions? (?:made|taken)|unresolved (?:issues|questions))\b",
+    re.IGNORECASE,
+)
+_SPEAKER_LINE_RE = re.compile(r"^\s*[-*]?\s*[A-Z][\w .'-]{1,40}:\s+\S", re.MULTILINE)
+
+
+def looks_like_comparison(text: str) -> bool:
+    return bool(_COMPARISON_RE.search(text or ""))
+
+
+def looks_like_transcript(text: str) -> bool:
+    t = text or ""
+    if _TRANSCRIPT_RE.search(t):
+        return True
+    return len(_SPEAKER_LINE_RE.findall(t)) >= 4
 
 
 def needs_reasoning(prompt: str, file_mime_type: str | None) -> bool:

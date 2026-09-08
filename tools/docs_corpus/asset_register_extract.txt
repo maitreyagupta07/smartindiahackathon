@@ -1,0 +1,87 @@
+SYNTHETIC / FICTIONAL DATA — FOR DEMO USE ONLY. Invented equipment records
+for testing the Sovereign AI Workbench knowledge base.
+
+DOCUMENT ID: ENG-AR-05
+TITLE: Plant Asset Register — Extract, Unit 200 (Crude & Vacuum)
+REVISION: 12  (data as of 2026-08-15)
+CUSTODIAN: Static Equipment Inspection (see HR-DIR-01, EMP-1042)
+
+------------------------------------------------------------------------
+RECORD FORMAT
+Tag No | Description | Service | Location | Installed | Design Pressure |
+Design Temp | Last Inspection | Next Inspection Due | Criticality | Custodian
+------------------------------------------------------------------------
+
+Tag No: V-101
+Description: Crude Feed Surge Drum
+Service: Crude oil / sour water
+Location: Unit 200, Pipe Rack Row B
+Installed: 2004-05
+Design Pressure: 12.0 barg
+Design Temp: 210 C
+Last Inspection: 2025-02-18 (internal + thickness survey)
+Next Inspection Due: 2029-02-18
+Criticality: High (C1)
+Custodian: Ravi Menon (EMP-1042)
+
+Tag No: V-204
+Description: Vacuum Column Overhead Knockout Drum
+Service: Hydrocarbon vapour / vacuum
+Location: Unit 200, Structure S-4, Level 3
+Installed: 2004-05
+Design Pressure: Full vacuum to 3.5 barg
+Design Temp: 175 C
+Last Inspection: 2024-11-03 (external + thickness survey)
+Next Inspection Due: 2026-11-03
+Criticality: High (C1)
+Custodian: Meera Krishnan (EMP-1045)
+Open Finding: 2024 thickness survey recorded 12% wall loss on the bottom
+head since the 2020 survey — classified Priority 1 per MAN-INSP-02 Section 2,
+Approval Note AN-2024-0417 raised to Unit Head.
+
+Tag No: P-220A
+Description: Vacuum Residue Pump (primary)
+Service: Vacuum residue, 340 C
+Location: Unit 200, Grade, Pump Row P2
+Installed: 2011-09
+Design Pressure: 40 barg
+Design Temp: 360 C
+Last Inspection: 2025-06-30 (vibration + seal check)
+Next Inspection Due: 2026-06-30
+Criticality: Medium (C2)
+Custodian: Ananya Iyer (EMP-1043)
+
+Tag No: E-215
+Description: Vacuum Column Feed/Bottoms Exchanger
+Service: Crude / vacuum residue
+Location: Unit 200, Exchanger Bank X-2
+Installed: 2004-05
+Design Pressure: Shell 18 barg / Tube 42 barg
+Design Temp: Shell 300 C / Tube 360 C
+Last Inspection: 2023-10-12 (bundle pull + eddy current)
+Next Inspection Due: 2027-10-12
+Criticality: Medium (C2)
+Custodian: Ravi Menon (EMP-1042)
+
+Tag No: TK-330
+Description: Slop Oil Storage Tank
+Service: Slop oil, atmospheric
+Location: Tank Farm North, Bund 3
+Installed: 1998-07
+Design Pressure: Atmospheric
+Design Temp: Ambient to 80 C
+Last Inspection: 2022-03-05 (API 653 out-of-service)
+Next Inspection Due: 2032-03-05
+Criticality: Low (C3)
+Custodian: Meera Krishnan (EMP-1045)
+Note: Insulated carbon steel, operating band 10-80 C — inside the CUI-
+susceptible range per MAN-INSP-02 Section 3; included in the risk-based
+CUI program.
+
+------------------------------------------------------------------------
+SUMMARY
+Records in this extract: 5
+Equipment with Next Inspection Due in 2026: V-204 (2026-11-03),
+P-220A (2026-06-30)
+Highest-criticality items (C1): V-101, V-204
+Open Priority 1 finding: V-204 (Approval Note AN-2024-0417)

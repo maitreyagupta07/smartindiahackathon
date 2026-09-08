@@ -1,5 +1,8 @@
 SOP: Handling of Confidential Plant Data with AI-Assisted Tools
 
+DOCUMENT ID: SOP-AI-03
+REVISION: 2  (effective 2025-12-01)
+
 1. Purpose
 This SOP governs the use of AI assistants for engineering, operations, and
 administrative tasks involving plant data, to prevent unauthorized

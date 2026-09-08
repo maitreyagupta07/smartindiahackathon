@@ -1,5 +1,8 @@
 STANDARD OPERATING PROCEDURE: Permit to Work (PTW) — General Plant Areas
 
+DOCUMENT ID: SOP-PTW-01
+REVISION: 5  (effective 2026-01-01)
+
 1. Purpose
 This SOP defines the mandatory steps for obtaining a Permit to Work (PTW)
 before any maintenance, hot work, confined space entry, or electrical

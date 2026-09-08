@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign AI Workbench</title>
-<link rel="stylesheet" href="styles.css?v=20260908">
+<link rel="stylesheet" href="styles.css?v=20260909">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -91,6 +91,7 @@
       <div class="idle-inner">
         <div class="greet">Hi, Operator 👋</div>
         <h1>What are we building today?</h1>
+        <div class="template-bar" id="template-bar-idle" aria-label="Task templates"></div>
         <div class="file-preview" id="file-preview-idle">
           <iconify-icon icon="lucide:paperclip"></iconify-icon><span class="name"></span>
           <button title="Remove"><iconify-icon icon="lucide:x"></iconify-icon></button>
@@ -110,6 +111,7 @@
 
     <div class="composer-dock" id="composer-dock" hidden>
       <div class="composer-inner">
+        <div class="template-bar template-bar--docked" id="template-bar-docked" aria-label="Task templates"></div>
         <div id="live-strip" class="live-strip"></div>
         <div class="file-preview" id="file-preview">
           <iconify-icon icon="lucide:paperclip"></iconify-icon><span class="name"></span>
@@ -158,28 +160,33 @@
       <span class="mono" id="graph-footer-task">TASK: —</span>
       <span class="sovereign"><iconify-icon icon="lucide:shield-check"></iconify-icon>System Sovereign</span>
     </footer>
-  </div>
 
-  <!-- Detail drawer -->
-  <div class="drawer-overlay" id="drawer-overlay"></div>
-  <aside class="drawer" id="drawer">
-    <div class="drawer-header">
-      <div>
-        <h2 id="drawer-title">Stage Details</h2>
-        <span class="status-pill pending" id="drawer-status">PENDING</span>
-      </div>
-      <button class="icon-btn" id="drawer-close"><iconify-icon icon="lucide:x"></iconify-icon></button>
-    </div>
-    <div class="drawer-body custom-scroll" id="drawer-body"></div>
-  </aside>
+    <!-- Contextual node inspector — a compact popover anchored to the
+         selected graph node. Hover to peek, click to pin. Not a panel. -->
+    <div class="node-popover" id="node-popover" role="dialog" aria-live="polite" hidden></div>
+  </div>
 
   <div class="demo-badge" id="demo-badge" hidden>
     <span class="dot"></span>Demo mode — backend not detected
   </div>
+
+  <!-- Task template library (expanded) -->
+  <div class="template-overlay" id="template-overlay" hidden>
+    <div class="template-sheet">
+      <div class="template-sheet-head">
+        <div>
+          <h2>Task templates</h2>
+          <p>One-click starters for industrial knowledge work. Each fills the composer — review it, attach any files, then send.</p>
+        </div>
+        <button class="icon-btn" id="template-close" title="Close"><iconify-icon icon="lucide:x"></iconify-icon></button>
+      </div>
+      <div class="template-sheet-body custom-scroll" id="template-sheet-body"></div>
+    </div>
+  </div>
 </div>
 
 <script src="app.js?v=20260908"></script>
-<script src="user.js?v=20260908"></script>
+<script src="user.js?v=20260909"></script>
 <script src="jerry.js?v=20260907"></script>
 <script>
   document.getElementById('sidebar-user-id').textContent = Store.USER_ID;
