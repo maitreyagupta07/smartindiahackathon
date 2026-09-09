@@ -6,3 +6,316 @@
     Local:  http://localhost:8000/
     LAN:    http://172.16.0.2:8000/
 
+INFO:     Started server process [29732]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52445 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64299 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:64299 - "GET /styles.css?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:55088 - "GET /user.js?v=20260918 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58724 - "GET /app.js?v=20260917 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58724 - "GET /api/audit-log HTTP/1.1" 200 OK
+[docsearch] opening persistent Chroma index at: C:\Users\Guransh Rally\smartindiahackathon\tools\chroma_db
+[docsearch] global KB collection 'global_kb' loaded, 0 chunk(s) already persisted on disk
+INFO:     127.0.0.1:58724 - "GET /api/kb/list?user_id=qwen_nigga HTTP/1.1" 200 OK
+[LOOP] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed START prompt='generate image of a dog' has_file=False chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e'
+[ROUTER] task_type=image-generation first_model=sd-turbo needs_reasoning=False confidence=3.0 multi_step=False workflow=None matched=["'image of'(+3,output_term)"] all_scores={'code-execution': 0.0, 'doc-search': 0.0, 'document-generation': 0.0, 'image-generation': 3.0, 'time-series-forecasting': 0.0}
+[PLANNER] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed step0 -> call_tool(generate_image)
+[LOOP] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed step=1 planned_action=call_tool model=None tool=generate_image
+[LOOP] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed calling tool=generate_image args={'prompt': 'generate image of a dog'}
+[TOOLS] generate_image prompt='generate image of a dog'
+INFO:     127.0.0.1:61215 - "POST /api/chat/05946202-d9ba-48ca-8941-50abda6c4e7e/message HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+[IMAGEGEN] loading SD Turbo from C:\Users\Guransh Rally\smartindiahackathon\extra_models\sd-turbo onto device=cpu dtype=torch.float32
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:00<00:01,  3.35it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00,  8.13it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  7.71it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  7.21it/s]
+You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+[IMAGEGEN] generating image prompt='generate image of a dog' steps=1
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+  0%|          | 0/1 [00:00<?, ?it/s]INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+100%|██████████| 1/1 [00:04<00:00,  4.81s/it]100%|██████████| 1/1 [00:04<00:00,  4.82s/it]
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+[IMAGEGEN] saved -> C:\Users\Guransh Rally\smartindiahackathon\shared_files\2017a713-generated-image.png
+[TOOLS] generate_image done file_name=2017a713-generated-image.png
+[LOOP] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed tool=generate_image OBSERVATION={'file_url': '/files/2017a713-generated-image.png', 'file_name': '2017a713-generated-image.png'}
+[STATE] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed step=1 action=call_tool tool=generate_image model=sd-turbo status=ok
+[PLANNER] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed generate_image observed file_url=/files/2017a713-generated-image.png file_name=2017a713-generated-image.png -> finalize
+[LOOP] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed step=2 planned_action=finalize model=None tool=None
+[LOOP] task_id=4cac1a61-c71d-41ae-a929-07bb86c0f1ed END status=completed result_type=file files=[{'file_url': '/files/2017a713-generated-image.png', 'file_name': '2017a713-generated-image.png'}]
+INFO:     127.0.0.1:61215 - "GET /api/task-status/4cac1a61-c71d-41ae-a929-07bb86c0f1ed HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61215 - "GET /files/2017a713-generated-image.png HTTP/1.1" 200 OK
+[LOOP] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c START prompt='generate image of tom and jerry' has_file=False chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e'
+[ROUTER] task_type=image-generation first_model=sd-turbo needs_reasoning=False confidence=3.0 multi_step=False workflow=None matched=["'image of'(+3,output_term)"] all_scores={'code-execution': 0.0, 'doc-search': 0.0, 'document-generation': 0.0, 'image-generation': 3.0, 'time-series-forecasting': 0.0}
+[PLANNER] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c step0 -> call_tool(generate_image)
+[LOOP] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c step=1 planned_action=call_tool model=None tool=generate_image
+[LOOP] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c calling tool=generate_image args={'prompt': 'generate image of tom and jerry'}
+[TOOLS] generate_image prompt='generate image of tom and jerry'
+INFO:     127.0.0.1:52442 - "POST /api/chat/05946202-d9ba-48ca-8941-50abda6c4e7e/message HTTP/1.1" 200 OK
+[IMAGEGEN] generating image prompt='generate image of tom and jerry' steps=1
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+  0%|          | 0/1 [00:00<?, ?it/s]INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+100%|██████████| 1/1 [00:04<00:00,  4.23s/it]100%|██████████| 1/1 [00:04<00:00,  4.23s/it]
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+[IMAGEGEN] saved -> C:\Users\Guransh Rally\smartindiahackathon\shared_files\033cc843-generated-image.png
+[TOOLS] generate_image done file_name=033cc843-generated-image.png
+[LOOP] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c tool=generate_image OBSERVATION={'file_url': '/files/033cc843-generated-image.png', 'file_name': '033cc843-generated-image.png'}
+[STATE] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c step=1 action=call_tool tool=generate_image model=sd-turbo status=ok
+[PLANNER] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c generate_image observed file_url=/files/033cc843-generated-image.png file_name=033cc843-generated-image.png -> finalize
+[LOOP] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c step=2 planned_action=finalize model=None tool=None
+[LOOP] task_id=685d674b-549e-407d-a556-6c3f5b6a3d8c END status=completed result_type=file files=[{'file_url': '/files/033cc843-generated-image.png', 'file_name': '033cc843-generated-image.png'}]
+INFO:     127.0.0.1:52442 - "GET /api/task-status/685d674b-549e-407d-a556-6c3f5b6a3d8c HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62995 - "GET /files/033cc843-generated-image.png HTTP/1.1" 200 OK
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 START prompt='take the dog image, and make it red' has_file=False chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e'
+[ROUTER] chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 step0 -> call_tool(search_docs) chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 calling tool=search_docs args={'query': 'take the dog image, and make it red', 'top_k': 5, 'chat_id': '05946202-d9ba-48ca-8941-50abda6c4e7e', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='take the dog image, and make it red' top_k=5 chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' user_id='qwen_nigga'
+INFO:     127.0.0.1:61627 - "POST /api/chat/05946202-d9ba-48ca-8941-50abda6c4e7e/message HTTP/1.1" 200 OK
+[docsearch] chat KB collection 'chat_kb' loaded, 0 chunk(s) already persisted on disk
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='The knowledge base does not contain any relevant passages about generating images or modifying colors. Therefore, I cann'
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 model=qwen3:1.7b response_preview='The knowledge base does not contain any relevant passages about generating images or modifying colors. Therefore, I cann' tokens=prompt:132/completion:220
+[STATE] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 qwen observed -> finalize
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=f46e43b8-0d5d-43ef-bcc4-45368a4165c4 END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:61627 - "GET /api/task-status/f46e43b8-0d5d-43ef-bcc4-45368a4165c4 HTTP/1.1" 200 OK
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 START prompt='helo' has_file=False chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e'
+[ROUTER] chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 step0 -> call_tool(search_docs) chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 calling tool=search_docs args={'query': 'helo', 'top_k': 5, 'chat_id': '05946202-d9ba-48ca-8941-50abda6c4e7e', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='helo' top_k=5 chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' user_id='qwen_nigga'
+INFO:     127.0.0.1:60868 - "POST /api/chat/05946202-d9ba-48ca-8941-50abda6c4e7e/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:60868 - "GET /api/task-status/8c102009-4338-45aa-a707-5bbb4d550a36 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60868 - "GET /api/task-status/8c102009-4338-45aa-a707-5bbb4d550a36 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60868 - "GET /api/task-status/8c102009-4338-45aa-a707-5bbb4d550a36 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60868 - "GET /api/task-status/8c102009-4338-45aa-a707-5bbb4d550a36 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='The Knowledge Base does not contain any relevant passages about image generation or color modification. Therefore, I can'
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 model=qwen3:1.7b response_preview='The Knowledge Base does not contain any relevant passages about image generation or color modification. Therefore, I can' tokens=prompt:169/completion:160
+[STATE] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 qwen observed -> finalize
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=8c102009-4338-45aa-a707-5bbb4d550a36 END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:60868 - "GET /api/task-status/8c102009-4338-45aa-a707-5bbb4d550a36 HTTP/1.1" 200 OK
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 START prompt='Hello' has_file=False chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e'
+[ROUTER] chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=185fb8de-a15b-4da5-be24-51a797479015 step0 -> call_tool(search_docs) chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 calling tool=search_docs args={'query': 'Hello', 'top_k': 5, 'chat_id': '05946202-d9ba-48ca-8941-50abda6c4e7e', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='Hello' top_k=5 chat_id='05946202-d9ba-48ca-8941-50abda6c4e7e' user_id='qwen_nigga'
+INFO:     127.0.0.1:51487 - "POST /api/chat/05946202-d9ba-48ca-8941-50abda6c4e7e/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=185fb8de-a15b-4da5-be24-51a797479015 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=185fb8de-a15b-4da5-be24-51a797479015 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:51487 - "GET /api/task-status/185fb8de-a15b-4da5-be24-51a797479015 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51487 - "GET /api/task-status/185fb8de-a15b-4da5-be24-51a797479015 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51487 - "GET /api/task-status/185fb8de-a15b-4da5-be24-51a797479015 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='The Knowledge Base does not contain any relevant passages about generating images or modifying colors. Therefore, I cann'
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 model=qwen3:1.7b response_preview='The Knowledge Base does not contain any relevant passages about generating images or modifying colors. Therefore, I cann' tokens=prompt:205/completion:190
+[STATE] task_id=185fb8de-a15b-4da5-be24-51a797479015 step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=185fb8de-a15b-4da5-be24-51a797479015 qwen observed -> finalize
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=185fb8de-a15b-4da5-be24-51a797479015 END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:51487 - "GET /api/task-status/185fb8de-a15b-4da5-be24-51a797479015 HTTP/1.1" 200 OK
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb START prompt='Hello' has_file=False chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6'
+[ROUTER] chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb step0 -> call_tool(search_docs) chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb calling tool=search_docs args={'query': 'Hello', 'top_k': 5, 'chat_id': '699ba858-3874-4e06-bf98-a9f12a02a4e6', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='Hello' top_k=5 chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga'
+INFO:     127.0.0.1:64360 - "POST /api/chat/699ba858-3874-4e06-bf98-a9f12a02a4e6/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:64360 - "GET /api/task-status/6cd3518a-d50c-44e5-8647-e415c7ff5efb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64360 - "GET /api/task-status/6cd3518a-d50c-44e5-8647-e415c7ff5efb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64360 - "GET /api/task-status/6cd3518a-d50c-44e5-8647-e415c7ff5efb HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='Hello! You said "Hello" in your question. If you have any specific questions or need assistance, feel free to share what'
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb model=qwen3:1.7b response_preview='Hello! You said "Hello" in your question. If you have any specific questions or need assistance, feel free to share what' tokens=prompt:113/completion:185
+[STATE] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb qwen observed -> finalize
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=6cd3518a-d50c-44e5-8647-e415c7ff5efb END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:64360 - "GET /api/task-status/6cd3518a-d50c-44e5-8647-e415c7ff5efb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62489 - "GET /files/2017a713-generated-image.png HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:62489 - "GET /files/2017a713-generated-image.png HTTP/1.1" 200 OK
+[LOOP] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db START prompt='summarize this' has_file=True chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6'
+[ROUTER] task_type=vision first_model=moondream needs_reasoning=True confidence=1.0 multi_step=False workflow=None matched=["'<image upload>'(+1.0,file_mime_type)"] all_scores={'vision': 1.0}
+[PLANNER] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db step0 -> call_moondream (vision entry point)
+[LOOP] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db step=1 planned_action=call_moondream model=moondream tool=None
+[INFERENCE_CLIENT] -> model=moondream url=http://localhost:11434/api/generate has_image=True
+INFO:     127.0.0.1:51825 - "POST /api/chat/699ba858-3874-4e06-bf98-a9f12a02a4e6/message HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=moondream response_preview="\nThe image features a black and white portrait of the head, face, eyes, nose, mouth area. The dog's fur appears to be sh"
+[LOOP] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db model=moondream response_preview="\nThe image features a black and white portrait of the head, face, eyes, nose, mouth area. The dog's fur appears to be sh" tokens=prompt:740/completion:42
+[STATE] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db step=1 action=call_moondream tool=None model=moondream status=ok
+[PLANNER] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db moondream observed -> chaining to call_qwen for reasoning
+[LOOP] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='The summary is: This image shows a black-and-white portrait of a dog’s head and facial features (eyes, nose, mouth), wit'
+[LOOP] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db model=qwen3:1.7b response_preview='The summary is: This image shows a black-and-white portrait of a dog’s head and facial features (eyes, nose, mouth), wit' tokens=prompt:80/completion:421
+[STATE] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db qwen observed -> finalize
+[LOOP] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=71f89c31-05f0-42c7-b8f7-2d993c9e43db END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:51825 - "GET /api/task-status/71f89c31-05f0-42c7-b8f7-2d993c9e43db HTTP/1.1" 200 OK
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f START prompt='Hello what are you up to' has_file=False chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6'
+[ROUTER] chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=a252320f-912c-4a4e-b842-488405716d4f step0 -> call_tool(search_docs) chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f calling tool=search_docs args={'query': 'Hello what are you up to', 'top_k': 5, 'chat_id': '699ba858-3874-4e06-bf98-a9f12a02a4e6', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='Hello what are you up to' top_k=5 chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga'
+INFO:     127.0.0.1:65318 - "POST /api/chat/699ba858-3874-4e06-bf98-a9f12a02a4e6/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=a252320f-912c-4a4e-b842-488405716d4f step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=a252320f-912c-4a4e-b842-488405716d4f chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:65318 - "GET /api/task-status/a252320f-912c-4a4e-b842-488405716d4f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65318 - "GET /api/task-status/a252320f-912c-4a4e-b842-488405716d4f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65318 - "GET /api/task-status/a252320f-912c-4a4e-b842-488405716d4f HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview="I don't have access to external documents or additional information beyond the conversation history. Let me know if you'"
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f model=qwen3:1.7b response_preview="I don't have access to external documents or additional information beyond the conversation history. Let me know if you'" tokens=prompt:198/completion:187
+[STATE] task_id=a252320f-912c-4a4e-b842-488405716d4f step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=a252320f-912c-4a4e-b842-488405716d4f qwen observed -> finalize
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=a252320f-912c-4a4e-b842-488405716d4f END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:65318 - "GET /api/task-status/a252320f-912c-4a4e-b842-488405716d4f HTTP/1.1" 200 OK
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df START prompt='summary of autumn in India Haryana' has_file=False chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6'
+[ROUTER] chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df step0 -> call_tool(search_docs) chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df calling tool=search_docs args={'query': 'summary of autumn in India Haryana', 'top_k': 5, 'chat_id': '699ba858-3874-4e06-bf98-a9f12a02a4e6', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='summary of autumn in India Haryana' top_k=5 chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga'
+INFO:     127.0.0.1:63638 - "POST /api/chat/699ba858-3874-4e06-bf98-a9f12a02a4e6/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:63638 - "GET /api/task-status/d728f4eb-1ce0-444b-8c65-c6adfdfde8df HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63638 - "GET /api/task-status/d728f4eb-1ce0-444b-8c65-c6adfdfde8df HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63638 - "GET /api/task-status/d728f4eb-1ce0-444b-8c65-c6adfdfde8df HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview="There are no relevant passages found in the uploaded documents to provide a summary of autumn in India's Haryana state."
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df model=qwen3:1.7b response_preview="There are no relevant passages found in the uploaded documents to provide a summary of autumn in India's Haryana state." tokens=prompt:246/completion:150
+[STATE] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df qwen observed -> finalize
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=d728f4eb-1ce0-444b-8c65-c6adfdfde8df END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:63638 - "GET /api/task-status/d728f4eb-1ce0-444b-8c65-c6adfdfde8df HTTP/1.1" 200 OK
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 START prompt='generate summary of autumn in Haryana India' has_file=False chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6'
+[ROUTER] chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 step0 -> call_tool(search_docs) chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 calling tool=search_docs args={'query': 'generate summary of autumn in Haryana India', 'top_k': 5, 'chat_id': '699ba858-3874-4e06-bf98-a9f12a02a4e6', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='generate summary of autumn in Haryana India' top_k=5 chat_id='699ba858-3874-4e06-bf98-a9f12a02a4e6' user_id='qwen_nigga'
+INFO:     127.0.0.1:65272 - "POST /api/chat/699ba858-3874-4e06-bf98-a9f12a02a4e6/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:65272 - "GET /api/task-status/811257d0-e0f8-46bb-8f91-681e2cb11d55 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65272 - "GET /api/task-status/811257d0-e0f8-46bb-8f91-681e2cb11d55 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65272 - "GET /api/task-status/811257d0-e0f8-46bb-8f91-681e2cb11d55 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview="There are no relevant passages found in the uploaded documents to provide a detailed summary of autumn in India's Haryan"
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 model=qwen3:1.7b response_preview="There are no relevant passages found in the uploaded documents to provide a detailed summary of autumn in India's Haryan" tokens=prompt:282/completion:167
+[STATE] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 qwen observed -> finalize
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=811257d0-e0f8-46bb-8f91-681e2cb11d55 END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:65272 - "GET /api/task-status/811257d0-e0f8-46bb-8f91-681e2cb11d55 HTTP/1.1" 200 OK

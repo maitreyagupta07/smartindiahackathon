@@ -1,0 +1,13 @@
+Looking in indexes: https://download.pytorch.org/whl/cu130
+Collecting torch==2.14.0+cu130
+  Downloading torch-2.14.0%2Bcu130-cp311-cp311-win_amd64.whl.metadata (37 kB)
+Downloading torch-2.14.0%2Bcu130-cp311-cp311-win_amd64.whl (1990.6 MB)
+   ---------------------------------------- 2.0/2.0 GB 2.8 MB/s  0:10:43
+Installing collected packages: torch
+  Attempting uninstall: torch
+    Found existing installation: torch 2.14.0
+    Uninstalling torch-2.14.0:
+      Successfully uninstalled torch-2.14.0
+  WARNING: Failed to remove contents in a temporary directory 'C:\Users\Guransh Rally\smartindiahackathon\.venv\Lib\site-packages\~orch'.
+  You can safely remove it manually.
+Successfully installed torch-2.14.0+cu130

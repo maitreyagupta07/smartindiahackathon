@@ -1,0 +1,21 @@
+=== Sovereign On-Premise Agentic AI Workbench ===
+[ok] Ollama already running on localhost:11434
+[ok] Docker reachable (code-execution sandbox available)
+[..] Starting the Workbench API on 0.0.0.0:8000...
+
+    Local:  http://localhost:8000/
+    LAN:    http://172.16.0.2:8000/
+
+INFO:     Started server process [15044]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:56989 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56724 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56724 - "GET /styles.css?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:64292 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:58755 - "GET /user.js?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:58755 - "GET /api/audit-log HTTP/1.1" 200 OK
+[docsearch] opening persistent Chroma index at: C:\Users\Guransh Rally\smartindiahackathon\tools\chroma_db
+[docsearch] global KB collection 'global_kb' loaded, 0 chunk(s) already persisted on disk
+INFO:     127.0.0.1:58755 - "GET /api/kb/list?user_id=qwen_nigga HTTP/1.1" 200 OK

@@ -34,7 +34,7 @@ def _get_pipeline(horizon: int):
     # fixed forecast_horizon at construction time, so a different horizon
     # needs its own instance rather than silently reusing a mismatched one.
     if _pipeline is not None and _pipeline[0] == horizon:
-        return _pipeline[1]
+        return _pipeline[1], _pipeline[2]
 
     if not _MODEL_DIR.exists():
         raise ForecastUnavailable(
@@ -42,6 +42,7 @@ def _get_pipeline(horizon: int):
             f"AutonLab/MOMENT-1-small into extra_models/moment-1-small first."
         )
     try:
+        import torch
         from momentfm import MOMENTPipeline
     except ImportError as exc:
         raise ForecastUnavailable(
@@ -49,15 +50,22 @@ def _get_pipeline(horizon: int):
             "`pip install torch momentfm` in this project's venv."
         ) from exc
 
-    print(f"[FORECAST] loading MOMENT-1-small from {_MODEL_DIR} horizon={horizon}")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"[FORECAST] loading MOMENT-1-small from {_MODEL_DIR} horizon={horizon} device={device}")
     model = MOMENTPipeline.from_pretrained(
         str(_MODEL_DIR),
         model_kwargs={"task_name": "forecasting", "forecast_horizon": horizon},
         local_files_only=True,
     )
     model.init()
-    _pipeline = (horizon, model)
-    return model
+    # from_pretrained/init() don't move the model to the GPU on their own
+    # (unlike diffusers' from_pretrained(...).to(device) pattern in
+    # imagegen.py) — without this explicit .to(), MOMENT silently runs on
+    # CPU even with a CUDA-enabled torch installed and a free GPU sitting
+    # right there.
+    model = model.to(device)
+    _pipeline = (horizon, model, device)
+    return model, device
 
 
 def _tile_to_context(data: list, length: int = _CONTEXT_LENGTH) -> list:
@@ -80,14 +88,14 @@ def forecast_timeseries(data: list, horizon: int = 8) -> dict:
 
     import torch
 
-    model = _get_pipeline(horizon)
+    model, device = _get_pipeline(horizon)
     series = _tile_to_context([float(x) for x in data])
 
-    x_enc = torch.tensor(series, dtype=torch.float32).reshape(1, 1, -1)
-    print(f"[FORECAST] running inference input_len={len(data)} tiled_len={len(series)} horizon={horizon}")
+    x_enc = torch.tensor(series, dtype=torch.float32).reshape(1, 1, -1).to(device)
+    print(f"[FORECAST] running inference input_len={len(data)} tiled_len={len(series)} horizon={horizon} device={device}")
     with torch.no_grad():
         output = model(x_enc=x_enc)
-    forecast = output.forecast.reshape(-1).tolist()
+    forecast = output.forecast.reshape(-1).cpu().tolist()
 
     return {"input_length": len(data), "horizon": horizon, "forecast": [round(v, 4) for v in forecast]}
 

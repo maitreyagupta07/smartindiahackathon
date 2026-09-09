@@ -52,10 +52,17 @@ def _get_pipeline():
         ) from exc
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    print(f"[IMAGEGEN] loading SD Turbo from {_MODEL_DIR} onto device={device} dtype={dtype}")
+    # Always the fp16 weights, on CPU or GPU — HF's fp16 safetensors load
+    # and run fine on CPU too (slower, but numerically fine for images).
+    # `variant="fp16"` is what actually matters here: without it, diffusers
+    # loads the full-precision (fp32) files by DEFAULT regardless of
+    # torch_dtype, then casts down — silently doubling load time and disk
+    # I/O, and requiring the fp32 files to exist on disk at all (they don't
+    # — deleted; extra_models/sd-turbo only carries the fp16 variant now).
+    dtype = torch.float16
+    print(f"[IMAGEGEN] loading SD Turbo (fp16) from {_MODEL_DIR} onto device={device}")
     _pipe = AutoPipelineForText2Image.from_pretrained(
-        str(_MODEL_DIR), torch_dtype=dtype, safety_checker=None,
+        str(_MODEL_DIR), torch_dtype=dtype, variant="fp16", safety_checker=None,
     ).to(device)
     return _pipe
 
