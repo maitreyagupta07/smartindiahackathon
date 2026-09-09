@@ -27,6 +27,7 @@ let pollHandle = null;
 let currentChatId = null;
 let currentChatTitle = null;
 let chatMessages = []; // ordered turns: {role:'user'|'assistant'|'system', ...}
+let renamingChatId = null; // chat currently showing its inline rename input, if any
 
 function persistCurrentChat() {
   if (!currentChatId) return;
@@ -410,6 +411,35 @@ function renderTaskSidebar() {
       openChat(el.dataset.openChat);
     });
   });
+  listEl.querySelectorAll('[data-rename-chat]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      renamingChatId = btn.dataset.renameChat;
+      renderTaskSidebar();
+      const input = listEl.querySelector('[data-rename-input]');
+      if (input) { input.focus(); input.select(); }
+    });
+  });
+  listEl.querySelectorAll('[data-rename-confirm]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      commitChatRename(btn.dataset.renameConfirm);
+    });
+  });
+  listEl.querySelectorAll('[data-rename-cancel]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      renamingChatId = null;
+      renderTaskSidebar();
+    });
+  });
+  listEl.querySelectorAll('[data-rename-input]').forEach((input) => {
+    input.addEventListener('click', (e) => e.stopPropagation());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commitChatRename(input.dataset.renameInput); }
+      else if (e.key === 'Escape') { e.preventDefault(); renamingChatId = null; renderTaskSidebar(); }
+    });
+  });
 
   // Files & Deliverables — file results + KB uploads in the ACTIVE chat.
   const files = [];
@@ -451,18 +481,63 @@ function renderTaskSidebar() {
 }
 
 function chatSidebarItemHtml(c) {
+  const title = c.title || 'New Chat';
+  if (renamingChatId === c.chat_id) {
+    return `
+      <div class="chat-sidebar-item renaming">
+        <iconify-icon icon="lucide:message-square" class="task-sidebar-item-icon"></iconify-icon>
+        <input type="text" class="chat-rename-input" data-rename-input="${c.chat_id}" value="${escapeHtml(title)}" maxlength="80">
+        <button class="chat-rename-btn chat-rename-confirm" data-rename-confirm="${c.chat_id}" title="Save name">
+          <iconify-icon icon="lucide:check"></iconify-icon>
+        </button>
+        <button class="chat-rename-btn" data-rename-cancel title="Cancel">
+          <iconify-icon icon="lucide:x"></iconify-icon>
+        </button>
+      </div>`;
+  }
   const isActive = currentChatId && currentChatId === c.chat_id;
   return `
-    <a href="#" class="task-sidebar-item ${isActive ? 'active' : ''}" data-open-chat="${c.chat_id}">
-      <iconify-icon icon="lucide:message-square" class="task-sidebar-item-icon"></iconify-icon>
-      <div class="task-sidebar-item-body">
-        <div class="task-sidebar-item-title">${escapeHtml(truncate(c.title || 'New Chat', 28))}</div>
-      </div>
-    </a>`;
+    <div class="chat-sidebar-item ${isActive ? 'active' : ''}">
+      <a href="#" class="chat-sidebar-item-link" data-open-chat="${c.chat_id}">
+        <iconify-icon icon="lucide:message-square" class="task-sidebar-item-icon"></iconify-icon>
+        <div class="task-sidebar-item-body">
+          <div class="task-sidebar-item-title" title="${escapeHtml(title)}">${escapeHtml(truncate(title, 28))}</div>
+        </div>
+      </a>
+      <button class="chat-rename-btn" data-rename-chat="${c.chat_id}" title="Rename chat">
+        <iconify-icon icon="lucide:pencil"></iconify-icon>
+      </button>
+    </div>`;
+}
+
+/** Saves a chat's user-chosen title (called from the inline sidebar rename
+ *  input) — the SAME Store.upsertChat path the auto "first prompt" title
+ *  already uses, so a rename is indistinguishable from any other title
+ *  update. Once currentChatTitle is set here, the normal
+ *  `if (!currentChatTitle) currentChatTitle = ...` auto-titling guard
+ *  (persistCurrentChat / handleMessage) naturally never overwrites it on
+ *  the next message, exactly like an auto-generated title already
+ *  wouldn't — a rename doesn't need its own separate "don't touch this"
+ *  flag. An empty/whitespace-only entry is treated as "keep the existing
+ *  title" rather than saving a blank one. */
+function commitChatRename(chatId) {
+  const listEl = document.getElementById('task-sidebar-list');
+  const input = listEl && listEl.querySelector(`[data-rename-input="${chatId}"]`);
+  const newTitle = input ? input.value.trim() : '';
+  if (newTitle) {
+    Store.upsertChat({ chat_id: chatId, title: newTitle });
+    if (chatId === currentChatId) {
+      currentChatTitle = newTitle;
+      renderConversation(); // also updates the topbar title
+    }
+  }
+  renamingChatId = null;
+  renderTaskSidebar();
 }
 
 function openChat(chatId) {
   if (!chatId || chatId === currentChatId) return;
+  renamingChatId = null; // abandon any in-progress rename on a different chat row
   if ('speechSynthesis' in window) window.speechSynthesis.cancel(); // don't let a switched-away answer keep talking
   stopPolling();
   currentTask = null;
@@ -807,6 +882,7 @@ function initComposer() {
     currentChatId = null;
     currentChatTitle = null;
     chatMessages = [];
+    renamingChatId = null;
     renderConversation();
     renderTaskSidebar();
     renderLiveStrip({ stages: {} });
@@ -1831,7 +1907,12 @@ const TASK_TEMPLATES = [
 ];
 
 const TemplateLibrary = {
-  FEATURED_LIMIT: 4,
+  // 3, not 4 — with the "More" pill that's 4 buttons total, fitting one row
+  // instead of wrapping to two on the idle "New Chat" screen (reported as
+  // feeling cluttered — a blank page immediately showing two rows of
+  // buttons above the composer). The full template library is still one
+  // click away via "More"; nothing here was removed, just shown by default.
+  FEATURED_LIMIT: 3,
 
   chipHtml(tpl) {
     return `<button class="template-chip" data-template="${tpl.id}" title="${escapeHtml(tpl.prompt.split('\n')[0])}">` +
