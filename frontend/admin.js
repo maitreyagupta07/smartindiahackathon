@@ -431,9 +431,125 @@ function initKnowledgeBase() {
   loadKnowledgeBase();
 }
 
+/* Network Monitor (Person E) — Security & Sovereignty tab. Calls the app's
+   own /api/network-status endpoint (a live psutil sweep of THIS machine's
+   established TCP connections, classified LOCAL / LAN_CLIENT / EXTERNAL /
+   VIOLATION). Evidence wording only ("N external connections observed"),
+   never "zero external calls ever". Wireshark stays the independent
+   packet-level check and is not wired in here. */
+const NetworkMonitor = {
+  _fmtTs(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  },
+
+  _setStatus(elId, cls, icon, text) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.className = `netmon-status ${cls}`;
+    el.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon><span>${escapeHtml(text)}</span>`;
+  },
+
+  render(data) {
+    const conns = Number(data.external_connections || 0);
+    const ips = Array.isArray(data.external_ips) ? data.external_ips : [];
+    const violations = Number(data.policy_violations || 0);
+
+    const setVal = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    setVal('netmon-ext-conns', conns.toLocaleString());
+    setVal('netmon-ext-ips', ips.length.toLocaleString());
+    setVal('netmon-violations', violations.toLocaleString());
+
+    const violationColor = (id, bad) => {
+      const e = document.getElementById(id);
+      if (e) e.style.color = bad ? 'var(--error)' : 'var(--success)';
+    };
+    violationColor('netmon-ext-conns', conns > 0);
+    violationColor('netmon-ext-ips', ips.length > 0);
+    violationColor('netmon-violations', violations > 0);
+
+    const ipList = document.getElementById('netmon-ext-ip-list');
+    if (ipList) {
+      ipList.hidden = ips.length === 0;
+      ipList.textContent = ips.length ? `External/public IPs observed: ${ips.join(', ')}` : '';
+    }
+    const detail = document.getElementById('netmon-detail');
+    if (detail) {
+      detail.hidden = !data.detail;
+      detail.textContent = data.detail || '';
+    }
+    document.getElementById('netmon-last-checked').textContent = this._fmtTs(data.last_checked);
+
+    if (data.status === 'UNAVAILABLE') {
+      this._setStatus('netmon-status', 'unknown', 'lucide:help-circle', 'MONITOR UNAVAILABLE — could not read this host’s socket table');
+    } else if (data.status === 'VIOLATIONS_DETECTED' || conns > 0) {
+      this._setStatus('netmon-status', 'violation', 'lucide:shield-x',
+        `VIOLATIONS DETECTED — ${conns} external connection${conns === 1 ? '' : 's'} to ${ips.length} public IP${ips.length === 1 ? '' : 's'} observed`);
+    } else {
+      this._setStatus('netmon-status', 'secure', 'lucide:shield-check', 'SECURE — 0 external connections observed');
+    }
+  },
+
+  renderDemo() {
+    this.render({
+      status: 'SECURE', external_connections: 0, external_ips: [], policy_violations: 0,
+      last_checked: new Date().toISOString(),
+      detail: 'Illustrative demo data — backend not detected. Run the app for a live sweep.',
+    });
+  },
+
+  async load() {
+    try {
+      const data = await Api.getNetworkStatus();
+      this.render(data);
+    } catch {
+      this.renderDemo();
+    }
+  },
+
+  async checkTask() {
+    const input = document.getElementById('netmon-task-input');
+    const out = document.getElementById('netmon-task-result');
+    if (!input || !out) return;
+    const id = input.value.trim();
+    if (!id) { out.innerHTML = '<span style="color:var(--text-muted)">Enter a task_id.</span>'; return; }
+    out.innerHTML = '<span style="color:var(--text-muted)">Checking…</span>';
+    try {
+      const d = await Api.getTaskNetworkStatus(id);
+      const ips = Array.isArray(d.external_ips) ? d.external_ips : [];
+      const bad = d.status === 'VIOLATIONS_DETECTED' || Number(d.external_connections) > 0;
+      const color = d.status === 'UNAVAILABLE' ? 'var(--text-muted)' : (bad ? 'var(--error)' : 'var(--success)');
+      out.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="font-weight:600;color:${color}">${escapeHtml(d.status)} · task ${escapeHtml(String(d.task_id).slice(0, 12))}</div>
+          <div>External connections observed: <span class="mono">${Number(d.external_connections || 0)}</span></div>
+          <div>External/public IPs observed: <span class="mono">${ips.length ? escapeHtml(ips.join(', ')) : '0'}</span></div>
+          <div>Policy violations: <span class="mono">${Number(d.policy_violations || 0)}</span></div>
+          <div style="color:var(--text-muted);font-size:11px">Sampled ${escapeHtml(this._fmtTs(d.started_at))} → ${escapeHtml(this._fmtTs(d.ended_at || d.last_checked))}</div>
+        </div>`;
+    } catch (err) {
+      out.innerHTML = `<span style="color:var(--error)">${escapeHtml(err.message || 'lookup failed')}</span>`;
+    }
+  },
+
+  init() {
+    const refresh = document.getElementById('netmon-refresh');
+    if (refresh) refresh.addEventListener('click', () => this.load());
+    const check = document.getElementById('netmon-task-check');
+    if (check) check.addEventListener('click', () => this.checkTask());
+    const input = document.getElementById('netmon-task-input');
+    if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.checkTask(); });
+    const sovNav = document.querySelector('.nav-item[data-tab="sovereignty"]');
+    if (sovNav) sovNav.addEventListener('click', () => this.load());
+    this.load();
+  },
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initTableControls();
   initKnowledgeBase();
+  NetworkMonitor.init();
   loadAuditLog();
 });

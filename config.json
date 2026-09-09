@@ -16,5 +16,11 @@
   },
   "backend": {
     "max_concurrent_tasks": 2
+  },
+  "network_monitor": {
+    "app_port": 8000,
+    "ollama_port": 11434,
+    "expected_client_ips": ["172.16.213.52"],
+    "expected_lan_server_ip": "172.16.215.253"
   }
 }
