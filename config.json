@@ -8,9 +8,11 @@
   "inference_host": "localhost",
   "FILES_DIR": "./shared_files",
   "models": {
-    "text_model": "qwen2.5:1.5b-instruct",
+    "text_model": "qwen3:1.7b",
     "vision_model": "moondream",
-    "lora_adapter": "approval-note-lora"
+    "lora_adapter": "approval-note-lora",
+    "image_model": "sd-turbo",
+    "timeseries_model": "moment-1-small"
   },
   "backend": {
     "max_concurrent_tasks": 2

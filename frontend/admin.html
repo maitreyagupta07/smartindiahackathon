@@ -148,7 +148,7 @@
                   <div class="node-icon" style="background:var(--accent-wash);color:var(--accent);width:32px;height:32px;border-radius:8px"><iconify-icon icon="lucide:terminal"></iconify-icon></div>
                   <div>
                     <div style="font-size:13.5px;font-weight:600">Text / Code</div>
-                    <div class="mono" style="font-size:11px;color:var(--text-muted)">qwen2.5:1.5b-instruct</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-muted)">qwen3:1.7b</div>
                   </div>
                 </div>
                 <div class="status-cell" style="color:var(--success);font-size:12px"><span class="status-dot ok" style="width:6px;height:6px"></span>Configured</div>
@@ -173,6 +173,26 @@
                 </div>
                 <div class="status-cell" style="color:var(--success);font-size:12px"><span class="status-dot ok" style="width:6px;height:6px"></span>Configured</div>
               </div>
+              <div class="panel panel-pad">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                  <div class="node-icon" style="background:var(--border-subtle);color:var(--text-muted);width:32px;height:32px;border-radius:8px"><iconify-icon icon="lucide:image"></iconify-icon></div>
+                  <div>
+                    <div style="font-size:13.5px;font-weight:600">Image Generation</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-muted)">sd-turbo</div>
+                  </div>
+                </div>
+                <div class="status-cell" style="color:var(--success);font-size:12px"><span class="status-dot ok" style="width:6px;height:6px"></span>Configured</div>
+              </div>
+              <div class="panel panel-pad">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                  <div class="node-icon" style="background:var(--border-subtle);color:var(--text-muted);width:32px;height:32px;border-radius:8px"><iconify-icon icon="lucide:trending-up"></iconify-icon></div>
+                  <div>
+                    <div style="font-size:13.5px;font-weight:600">Time-Series Forecasting</div>
+                    <div class="mono" style="font-size:11px;color:var(--text-muted)">moment-1-small</div>
+                  </div>
+                </div>
+                <div class="status-cell" style="color:var(--success);font-size:12px"><span class="status-dot ok" style="width:6px;height:6px"></span>Configured</div>
+              </div>
             </div>
           </div>
 
@@ -181,7 +201,9 @@
             <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:0">
               <div class="kv-row"><span class="k">File attached, image type</span><span class="v">→ Vision (moondream)</span></div>
               <div class="kv-row"><span class="k">Approval-note style request</span><span class="v">→ Text + LoRA adapter</span></div>
-              <div class="kv-row"><span class="k">Everything else</span><span class="v">→ Text (qwen2.5:1.5b-instruct)</span></div>
+              <div class="kv-row"><span class="k">"generate an image of..." style request</span><span class="v">→ Image Generation (sd-turbo)</span></div>
+              <div class="kv-row"><span class="k">"forecast the next N values..." + numeric series</span><span class="v">→ Time-Series Forecasting (moment-1-small)</span></div>
+              <div class="kv-row"><span class="k">Everything else</span><span class="v">→ Text (qwen3:1.7b)</span></div>
               <div class="kv-row" style="border-bottom:none"><span class="k">Inference Endpoint</span><span class="v">localhost:11434 (Ollama)</span></div>
             </div>
           </div>

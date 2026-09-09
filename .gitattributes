@@ -1,0 +1,5 @@
+# Shell scripts must always check out with LF line endings, regardless of a
+# machine's core.autocrlf setting — a CRLF shebang line (#!/usr/bin/env bash\r)
+# breaks execution on Windows checkouts even under Git Bash/WSL, and can
+# corrupt string comparisons throughout the script body via stray \r bytes.
+*.sh text eol=lf

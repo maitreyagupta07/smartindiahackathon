@@ -218,6 +218,41 @@ DOCUMENT_GENERATION_SIGNALS = (
     ("approval note", 1, "weak_domain_term"),  # ambiguous alone — see model_registry
 )
 
+IMAGE_GENERATION_SIGNALS = (
+    ("generate an image", 6, "contextual_phrase"),
+    ("generate an image of", 6, "contextual_phrase"),
+    ("generate a picture", 6, "contextual_phrase"),
+    ("draw a picture of", 6, "contextual_phrase"),
+    ("create an image of", 6, "contextual_phrase"),
+    ("make an image of", 6, "contextual_phrase"),
+    ("draw an image of", 6, "contextual_phrase"),
+    ("generate a photo", 5, "contextual_phrase"),
+    ("draw me", 4, "contextual_phrase"),
+    ("draw a", 3, "action_object"),
+    ("paint a", 3, "action_object"),
+    ("illustrate", 3, "action_verb"),
+    ("image of", 3, "output_term"),
+    ("picture of", 3, "output_term"),
+    ("photo of", 2, "output_term"),
+)
+
+TIME_SERIES_FORECASTING_SIGNALS = (
+    ("forecast the next", 6, "contextual_phrase"),
+    ("predict the next", 5, "contextual_phrase"),
+    ("forecast the following", 5, "contextual_phrase"),
+    ("time series forecast", 6, "contextual_phrase"),
+    ("time-series forecast", 6, "contextual_phrase"),
+    ("forecast these values", 5, "contextual_phrase"),
+    ("forecast this data", 5, "contextual_phrase"),
+    ("forecast", 3, "action_verb"),
+    ("predict", 1, "weak_action_verb"),  # ambiguous alone ("predict what will happen")
+    ("time series", 3, "domain_term"),
+    ("time-series", 3, "domain_term"),
+    ("future values", 2, "domain_term"),
+    ("next readings", 2, "domain_term"),
+    ("trend projection", 3, "domain_term"),
+)
+
 # Multi-step connector phrases: signal that the prompt is describing a
 # sequence of actions rather than one flat request. Used only to decide
 # whether to flag is_multi_step / build an ordered workflow — never to
@@ -302,7 +337,15 @@ _COMPILED_SIGNALS = {
     "code-execution": _compiled(CODE_EXECUTION_SIGNALS),
     "doc-search": _compiled(DOC_SEARCH_SIGNALS),
     "document-generation": _compiled(DOCUMENT_GENERATION_SIGNALS),
+    "image-generation": _compiled(IMAGE_GENERATION_SIGNALS),
+    "time-series-forecasting": _compiled(TIME_SERIES_FORECASTING_SIGNALS),
 }
+
+# A real numeric series in the prompt (e.g. "10, 12, 14, 16, 18") is strong
+# evidence of a forecasting request specifically — at least 3 numbers
+# separated by commas/whitespace, distinct from a single arithmetic
+# expression (_ARITHMETIC_EXPRESSION_RE, above) or a short list of IDs.
+_NUMERIC_SERIES_RE = re.compile(r"(?:-?\d+(?:\.\d+)?\s*,\s*){2,}-?\d+(?:\.\d+)?")
 
 
 @dataclass
@@ -353,10 +396,19 @@ def classify(prompt: str, file_mime_type: Optional[str]) -> ClassificationResult
 
     scores = {}
     matches_by_type = {}
-    for task_type in ("code-execution", "doc-search", "document-generation"):
+    for task_type in (
+        "code-execution", "doc-search", "document-generation",
+        "image-generation", "time-series-forecasting",
+    ):
         score, matches = _score_task_type(lowered, task_type)
         scores[task_type] = score
         matches_by_type[task_type] = matches
+
+    # A real numeric series is strong, specific evidence of a forecasting
+    # request — much stronger than the bare word "forecast" alone.
+    if _NUMERIC_SERIES_RE.search(prompt):
+        scores["time-series-forecasting"] += 4
+        matches_by_type["time-series-forecasting"].append(("<numeric series>", 4, "numeric_evidence", 0))
 
     # Extra deterministic boosts that aren't simple phrase lookups:
     if _ARITHMETIC_EXPRESSION_RE.search(prompt):

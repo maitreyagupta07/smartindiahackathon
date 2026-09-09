@@ -81,7 +81,10 @@ from ..router.classifier import (
 from ..tools.pdf_extract import extract_text_from_pdf, is_pdf
 
 Action = Literal["call_qwen", "call_moondream", "call_tool", "finalize"]
-ToolName = Literal["execute_code", "search_docs", "generate_file", "scan_document"]
+ToolName = Literal[
+    "execute_code", "search_docs", "generate_file", "scan_document",
+    "generate_image", "forecast_timeseries",
+]
 
 # A tool call is allowed at most this many total attempts (initial + retries)
 # before the planner gives up and finalizes with an error. Independent of,
@@ -833,6 +836,63 @@ def _build_reasoning_prompt(original_prompt: str, moondream_observation: str) ->
     )
 
 
+_NUM_TOKEN = r"-?\d+(?:\.\d+)?"
+_NUMERIC_SERIES_TOKEN_RE = re.compile(_NUM_TOKEN)
+# The actual comma-separated run of numbers (e.g. "10, 12, 14, 16, 18") —
+# deliberately does NOT match a bare "next 5" (no comma) — that's the
+# horizon count (_extract_forecast_horizon, below), not series data.
+_NUMERIC_SERIES_RUN_RE = re.compile(r"(?:" + _NUM_TOKEN + r"\s*,\s*){2,}" + _NUM_TOKEN)
+
+
+_FORECAST_HORIZON_RE = re.compile(
+    r"(?:next|forecast|predict)\s+(\d+)\s*(?:values?|days?|points?|readings?|steps?|periods?)?",
+    re.IGNORECASE,
+)
+
+
+def _extract_forecast_horizon(prompt: str, default: int = 8) -> int:
+    """"forecast the next 5 values" -> 5; falls back to `default` if the
+    prompt doesn't name a specific count."""
+    m = _FORECAST_HORIZON_RE.search(prompt)
+    if m:
+        return max(1, min(int(m.group(1)), 64))  # sane bounds, never 0 or absurdly large
+    return default
+
+
+def _extract_numeric_series(prompt: str) -> list[float]:
+    """
+    Pulls the numeric time series out of the raw prompt text (e.g. "forecast
+    the next 5 values given: 10, 12, 14, 16, 18, 20" -> [10, 12, ..., 20]).
+    Deliberately simple/text-only for now — no CSV/spreadsheet upload
+    parsing yet, matching the classifier's numeric-series signal
+    (_NUMERIC_SERIES_RE in classifier.py), which is what routed the request
+    here in the first place.
+    """
+    m = _NUMERIC_SERIES_RUN_RE.search(prompt)
+    if not m:
+        return []
+    return [float(tok) for tok in _NUMERIC_SERIES_TOKEN_RE.findall(m.group(0))]
+
+
+def _build_forecast_prompt(original_prompt: str, tool_observation: dict) -> str:
+    """
+    Hands Qwen the ALREADY-COMPUTED forecast values (never asks it to
+    predict/recompute them itself — same principle as the code-execution
+    flow: a small model's own arithmetic/extrapolation is never trusted,
+    only its ability to present a verified result clearly).
+    """
+    values = tool_observation.get("forecast", [])
+    horizon = tool_observation.get("horizon")
+    return (
+        f"A time-series forecasting model (MOMENT-1-small) computed the next "
+        f"{horizon} value(s) for this request: \"{original_prompt}\"\n\n"
+        f"Forecasted values, in order: {values}\n\n"
+        f"Present these exact values clearly to the user (as a short list or "
+        f"sentence). Do not recompute, alter, or second-guess any number — "
+        f"just present the ones given above."
+    )
+
+
 def _build_ocr_result_prompt(original_prompt: str, tool_observation: dict) -> str:
     """
     Passes Tesseract's raw transcription to Qwen for cleanup/answering —
@@ -1210,6 +1270,42 @@ def decide_next_step(state: TaskState) -> NextStep:
                 image_base64=state.file_base64,
             )
 
+        if state.task_type == "image-generation":
+            print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(generate_image)")
+            return NextStep(
+                action="call_tool",
+                tool_name="generate_image",
+                tool_args={"prompt": state.prompt},
+            )
+
+        if state.task_type == "time-series-forecasting":
+            series = _extract_numeric_series(state.prompt)
+            horizon = _extract_forecast_horizon(state.prompt)
+            if len(series) < 2:
+                # Not enough real data in the prompt to forecast anything —
+                # fail loudly with a clear message instead of guessing or
+                # silently falling through to a plain text answer (which
+                # would let a small model hallucinate "forecasted" numbers
+                # with no computation behind them at all).
+                print(
+                    f"[PLANNER] task_id={state.task_id} step0 time-series-forecasting: "
+                    f"no usable numeric series found in prompt -> finalize with error"
+                )
+                raise ValueError(
+                    "No numeric time series found in the request — include the data "
+                    "as a comma-separated list, e.g. \"forecast the next 5 values: "
+                    "10, 12, 14, 16, 18\"."
+                )
+            print(
+                f"[PLANNER] task_id={state.task_id} step0 -> call_tool(forecast_timeseries) "
+                f"input_length={len(series)} horizon={horizon}"
+            )
+            return NextStep(
+                action="call_tool",
+                tool_name="forecast_timeseries",
+                tool_args={"data": series, "horizon": horizon},
+            )
+
         if state.task_type == "code-execution":
             print(
                 f"[PLANNER] task_id={state.task_id} step0 -> call_qwen "
@@ -1583,6 +1679,30 @@ def decide_next_step(state: TaskState) -> NextStep:
 
             print(f"[PLANNER] task_id={state.task_id} all requested deliverable(s) generated -> finalize")
             return NextStep(action="finalize")
+
+        if last.tool_name == "generate_image":
+            # Image is the deliverable itself — same principle as
+            # generate_file, just without the multi-deliverable loop (a
+            # single image-generation request only ever produces one file).
+            file_obs = last.observation or {}
+            generated = {"file_url": file_obs.get("file_url"), "file_name": file_obs.get("file_name")}
+            state.generated_files.append(generated)
+            if state.file_url is None:
+                state.file_url = generated["file_url"]
+                state.file_name = generated["file_name"]
+            print(
+                f"[PLANNER] task_id={state.task_id} generate_image observed "
+                f"file_url={generated['file_url']} file_name={generated['file_name']} -> finalize"
+            )
+            return NextStep(action="finalize")
+
+        if last.tool_name == "forecast_timeseries":
+            # Numbers are already verified/computed by the model itself —
+            # chain to Qwen only to present them clearly, same pattern as
+            # search_docs/scan_document above, never to recompute them.
+            reasoning_prompt = _build_forecast_prompt(state.prompt, last.observation or {})
+            print(f"[PLANNER] task_id={state.task_id} forecast_timeseries observed -> chaining to call_qwen")
+            return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
 
         print(f"[PLANNER] task_id={state.task_id} unknown tool_name '{last.tool_name}' -> finalize")
         return NextStep(action="finalize")

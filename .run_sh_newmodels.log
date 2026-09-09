@@ -1,0 +1,71 @@
+=== Sovereign On-Premise Agentic AI Workbench ===
+[ok] Ollama already running on localhost:11434
+[ok] Docker reachable (code-execution sandbox available)
+[..] Starting the Workbench API on 0.0.0.0:8000...
+
+    Local:  http://localhost:8000/
+    LAN:    http://172.16.0.2:8000/
+
+INFO:     Started server process [30860]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:57749 - "GET /health HTTP/1.1" 200 OK
+[LOOP] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 START prompt='generate an image of a red refinery storage tank under a blue sky' has_file=False chat_id=None
+[ROUTER] task_type=image-generation first_model=sd-turbo needs_reasoning=False confidence=15.0 multi_step=False workflow=None matched=["'generate an image'(+6,contextual_phrase)", "'generate an image of'(+6,contextual_phrase)", "'image of'(+3,output_term)"] all_scores={'code-execution': 0.0, 'doc-search': 0.0, 'document-generation': 0.0, 'image-generation': 15.0, 'time-series-forecasting': 0.0}
+[PLANNER] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 step0 -> call_tool(generate_image)
+[LOOP] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 step=1 planned_action=call_tool model=None tool=generate_image
+[LOOP] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 calling tool=generate_image args={'prompt': 'generate an image of a red refinery storage tank under a blue sky'}
+[TOOLS] generate_image prompt='generate an image of a red refinery storage tank under a blue sky'
+INFO:     127.0.0.1:57774 - "POST /api/submit-task HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57776 - "GET /api/task-status/76cdf64e-225d-4bc5-a973-905cd955caf7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57778 - "GET /api/task-status/76cdf64e-225d-4bc5-a973-905cd955caf7 HTTP/1.1" 200 OK
+[IMAGEGEN] loading SD Turbo from C:\Users\Guransh Rally\smartindiahackathon\extra_models\sd-turbo onto device=cpu dtype=torch.float32
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00, 18.82it/s]Loading pipeline components...:  80%|████████  | 4/5 [00:00<00:00,  5.05it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  6.73it/s]
+You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+[IMAGEGEN] generating image prompt='generate an image of a red refinery storage tank under a blue sky' steps=1
+  0%|          | 0/1 [00:00<?, ?it/s]INFO:     127.0.0.1:57782 - "GET /api/task-status/76cdf64e-225d-4bc5-a973-905cd955caf7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58570 - "GET /api/task-status/76cdf64e-225d-4bc5-a973-905cd955caf7 HTTP/1.1" 200 OK
+100%|██████████| 1/1 [00:05<00:00,  5.52s/it]100%|██████████| 1/1 [00:05<00:00,  5.52s/it]
+INFO:     127.0.0.1:49942 - "GET /api/task-status/76cdf64e-225d-4bc5-a973-905cd955caf7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49944 - "GET /api/task-status/76cdf64e-225d-4bc5-a973-905cd955caf7 HTTP/1.1" 200 OK
+[IMAGEGEN] saved -> C:\Users\Guransh Rally\smartindiahackathon\shared_files\d8db4ab8-generated-image.png
+[TOOLS] generate_image done file_name=d8db4ab8-generated-image.png
+[LOOP] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 tool=generate_image OBSERVATION={'file_url': '/files/d8db4ab8-generated-image.png', 'file_name': 'd8db4ab8-generated-image.png'}
+[STATE] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 step=1 action=call_tool tool=generate_image model=sd-turbo status=ok
+[PLANNER] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 generate_image observed file_url=/files/d8db4ab8-generated-image.png file_name=d8db4ab8-generated-image.png -> finalize
+[LOOP] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 step=2 planned_action=finalize model=None tool=None
+[LOOP] task_id=76cdf64e-225d-4bc5-a973-905cd955caf7 END status=completed result_type=file files=[{'file_url': '/files/d8db4ab8-generated-image.png', 'file_name': 'd8db4ab8-generated-image.png'}]
+INFO:     127.0.0.1:49949 - "GET /api/task-status/76cdf64e-225d-4bc5-a973-905cd955caf7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49955 - "GET /files/d8db4ab8-generated-image.png HTTP/1.1" 200 OK
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 START prompt='forecast the next 5 values for this sensor data: 10, 12, 14, 16, 18, 20, 22, 24' has_file=False chat_id=None
+[ROUTER] task_type=time-series-forecasting first_model=moment-1-small needs_reasoning=False confidence=13.0 multi_step=False workflow=None matched=["'forecast the next'(+6,contextual_phrase)", "'forecast'(+3,action_verb)", "'<numeric series>'(+4,numeric_evidence)"] all_scores={'code-execution': 4.0, 'doc-search': 0.0, 'document-generation': 0.0, 'image-generation': 0.0, 'time-series-forecasting': 13.0}
+[PLANNER] task_id=b55520c8-78e5-4e82-9605-add17214dd53 step0 -> call_tool(forecast_timeseries) input_length=8 horizon=5
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 step=1 planned_action=call_tool model=None tool=forecast_timeseries
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 calling tool=forecast_timeseries args={'data': [10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0], 'horizon': 5}
+[TOOLS] forecast_timeseries input_length=8 horizon=5
+INFO:     127.0.0.1:49964 - "POST /api/submit-task HTTP/1.1" 200 OK
+[FORECAST] loading MOMENT-1-small from C:\Users\Guransh Rally\smartindiahackathon\extra_models\moment-1-small horizon=5
+INFO:     127.0.0.1:49966 - "GET /api/task-status/b55520c8-78e5-4e82-9605-add17214dd53 HTTP/1.1" 200 OK
+C:\Users\Guransh Rally\smartindiahackathon\.venv\Lib\site-packages\momentfm\models\moment.py:174: UserWarning: Only reconstruction head is pre-trained. Classification and forecasting heads must be fine-tuned.
+  warnings.warn("Only reconstruction head is pre-trained. Classification and forecasting heads must be fine-tuned.")
+C:\Users\Guransh Rally\smartindiahackathon\.venv\Lib\site-packages\torch\utils\checkpoint.py:242: UserWarning: None of the inputs have requires_grad=True. Gradients will be None
+  check_backward_validity(args)
+Loading weights from local directory
+[FORECAST] running inference input_len=8 tiled_len=512 horizon=5
+[TOOLS] forecast_timeseries done forecast=[17.0, 16.9704, 17.9298, 18.7159, 17.0216]
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 tool=forecast_timeseries OBSERVATION={'input_length': 8, 'horizon': 5, 'forecast': [17.0, 16.9704, 17.9298, 18.7159, 17.0216]}
+[STATE] task_id=b55520c8-78e5-4e82-9605-add17214dd53 step=1 action=call_tool tool=forecast_timeseries model=moment-1-small status=ok
+[PLANNER] task_id=b55520c8-78e5-4e82-9605-add17214dd53 forecast_timeseries observed -> chaining to call_qwen
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:49970 - "GET /api/task-status/b55520c8-78e5-4e82-9605-add17214dd53 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49983 - "GET /api/task-status/b55520c8-78e5-4e82-9605-add17214dd53 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49993 - "GET /api/task-status/b55520c8-78e5-4e82-9605-add17214dd53 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='The forecasted values are [17.0, 16.9704, 17.9298, 18.7159, 17.0216].'
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 model=qwen3:1.7b response_preview='The forecasted values are [17.0, 16.9704, 17.9298, 18.7159, 17.0216].' tokens=prompt:165/completion:372
+[STATE] task_id=b55520c8-78e5-4e82-9605-add17214dd53 step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=b55520c8-78e5-4e82-9605-add17214dd53 qwen observed -> finalize
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=b55520c8-78e5-4e82-9605-add17214dd53 END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:49996 - "GET /api/task-status/b55520c8-78e5-4e82-9605-add17214dd53 HTTP/1.1" 200 OK

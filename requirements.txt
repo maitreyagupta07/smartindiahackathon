@@ -43,3 +43,23 @@ pytest-asyncio==0.24.0
 # demo/network_monitor.py — live proof-of-air-gap check (also used by the
 # admin "Network & Usage" panel to report real per-request client IPs)
 psutil==6.0.0
+
+# Local image generation (app/tools/imagegen.py, SD Turbo — weights in
+# extra_models/sd-turbo, not committed to the repo) and local time-series
+# forecasting (app/tools/forecast.py, MOMENT-1-small — weights in
+# extra_models/moment-1-small). Both fully offline at call time; not part
+# of the original three-tool contract (§2.6) — additive capabilities.
+#
+# transformers is pinned to a narrow window that satisfies BOTH libraries
+# at once, found the hard way: momentfm 0.1.4 declares transformers==4.33.3
+# but that's too OLD for diffusers 0.32.2 (missing SiglipImageProcessor,
+# added later); transformers 5.x is too NEW for diffusers 0.32.2 (removed
+# FLAX_WEIGHTS_NAME, which it still imports). 4.46.3 is the verified-working
+# middle ground — don't let momentfm's own (stricter than necessary) pin
+# drag this back down on a fresh `pip install -r requirements.txt`.
+torch==2.14.0
+diffusers==0.32.2
+transformers==4.46.3
+accelerate==1.14.0
+safetensors==0.8.0
+momentfm==0.1.4

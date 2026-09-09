@@ -17,6 +17,23 @@ inference client — is invoked as plain Python, in-process, EXCEPT:
 
 No other internal service is exposed. The browser talks ONLY to this app.
 """
+import sys
+
+# Windows' console/redirected-stdout encoding defaults to the legacy
+# system codepage (e.g. cp1252), not UTF-8 — unlike Linux/macOS, where
+# stdout is UTF-8 by default. Model responses (and prompts) routinely
+# contain emoji/non-Latin characters, and this app's debug logging
+# (app/inference/client.py and others) prints them straight to
+# stdout/stderr. Without this, a single emoji in a model's reply crashes
+# the *entire request* with UnicodeEncodeError the moment it's logged —
+# not a model or prompt problem, purely a Windows console-encoding gap.
+# errors="replace" means a truly unencodable byte becomes "?" in the log
+# instead of taking the process down; reconfigure() is a no-op-safe call
+# on platforms where stdout is already UTF-8.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles

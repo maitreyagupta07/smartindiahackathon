@@ -27,6 +27,8 @@ from . import filegen
 from . import doc_extract
 from . import doc_preview
 from . import ocr
+from . import imagegen
+from . import forecast
 
 
 class DocumentIngestError(Exception):
@@ -51,6 +53,31 @@ async def execute_code(code: str, language: str = "python") -> dict:
             "exit_code": 127,
         }
     print(f"[TOOLS] execute_code done exit_code={result.get('exit_code')}")
+    return result
+
+
+async def generate_image(prompt: str) -> dict:
+    """Shape: {"file_url": str, "file_name": str} — same convention as
+    generate_file (§2.7a): a path under the shared FILES_DIR."""
+    print(f"[TOOLS] generate_image prompt={prompt!r}")
+    try:
+        result = await asyncio.to_thread(imagegen.generate_image, prompt)
+    except imagegen.ImageGenUnavailable as e:
+        print(f"[TOOLS] generate_image UNAVAILABLE: {e}")
+        raise
+    print(f"[TOOLS] generate_image done file_name={result.get('file_name')}")
+    return result
+
+
+async def forecast_timeseries(data: list, horizon: int = 8) -> dict:
+    """Shape: {"input_length": int, "horizon": int, "forecast": [float, ...]}."""
+    print(f"[TOOLS] forecast_timeseries input_length={len(data) if data else 0} horizon={horizon}")
+    try:
+        result = await asyncio.to_thread(forecast.forecast_timeseries, data, horizon)
+    except forecast.ForecastUnavailable as e:
+        print(f"[TOOLS] forecast_timeseries UNAVAILABLE: {e}")
+        raise
+    print(f"[TOOLS] forecast_timeseries done forecast={result.get('forecast')}")
     return result
 
 

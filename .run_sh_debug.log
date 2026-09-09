@@ -1,0 +1,22 @@
++ set -euo pipefail
+++ dirname run.sh
++ cd .
++ PY=python3
++ command -v python3
++ VENV_BIN=.venv/bin
++ '[' -d .venv/bin ']'
++ VENV_BIN=.venv/Scripts
+++ python3 -c 'import json; print(json.load(open('\''config.json'\''))['\''ports'\'']['\''backend'\''])'
++ PORT=8000
++ echo '=== Sovereign On-Premise Agentic AI Workbench ==='
+=== Sovereign On-Premise Agentic AI Workbench ===
++ curl -s -o /dev/null --max-time 2 http://127.0.0.1:11434/api/tags
++ echo '[ok] Ollama already running on localhost:11434'
+[ok] Ollama already running on localhost:11434
++ docker info
++ echo '[ok] Docker reachable (code-execution sandbox available)'
+[ok] Docker reachable (code-execution sandbox available)
++ '[' '!' -d .venv ']'
+++ hostname -I
+++ awk '{print $1}'
++ LAN_IP=

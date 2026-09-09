@@ -13,9 +13,18 @@ again, exactly like ports.backend/inference already are for config.py.
 """
 from ..storage.config import MODELS as _CONFIG_MODELS
 
-TEXT_MODEL = _CONFIG_MODELS.get("text_model") or "qwen2.5:1.5b-instruct"
+TEXT_MODEL = _CONFIG_MODELS.get("text_model") or "qwen3:1.7b"
 VISION_MODEL = _CONFIG_MODELS.get("vision_model") or "moondream"
 LORA_ADAPTER = _CONFIG_MODELS.get("lora_adapter") or "approval-note-lora"  # Person A's fine-tuned adapter for approval-note file generation
+
+# Additive, beyond the original three-model contract (text/vision/LoRA, all
+# served by Ollama) — these two are NOT Ollama models, so they're never
+# passed to app/inference/client.py's call_inference(). They're only used
+# here as the `model_used`/audit-log label for their respective task types;
+# the actual model loading lives in app/tools/imagegen.py and
+# app/tools/forecast.py, each pointed at its own local weights directory.
+IMAGE_MODEL = _CONFIG_MODELS.get("image_model") or "sd-turbo"
+TIMESERIES_MODEL = _CONFIG_MODELS.get("timeseries_model") or "moment-1-small"
 
 TASK_TYPE_TO_MODEL = {
     "vision": VISION_MODEL,
@@ -23,6 +32,8 @@ TASK_TYPE_TO_MODEL = {
     "code-execution": TEXT_MODEL,
     "document-generation": TEXT_MODEL,
     "doc-search": TEXT_MODEL,
+    "image-generation": IMAGE_MODEL,
+    "time-series-forecasting": TIMESERIES_MODEL,
 }
 
 # Broad, general-purpose signal for "this request wants approval-note style

@@ -1,0 +1,48 @@
+=== Sovereign On-Premise Agentic AI Workbench ===
+[ok] Ollama already running on localhost:11434
+[ok] Docker reachable (code-execution sandbox available)
+[..] Starting the Workbench API on 0.0.0.0:8000...
+
+    Local:  http://localhost:8000/
+    LAN:    http://172.16.0.2:8000/
+
+INFO:     Started server process [12904]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51237 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54901 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:54901 - "GET /styles.css?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:53143 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:53143 - "GET /user.js?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:53143 - "GET /api/audit-log HTTP/1.1" 200 OK
+[docsearch] opening persistent Chroma index at: C:\Users\Guransh Rally\smartindiahackathon\tools\chroma_db
+[docsearch] global KB collection 'global_kb' loaded, 0 chunk(s) already persisted on disk
+INFO:     127.0.0.1:53143 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51588 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:51588 - "GET /styles.css?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:53002 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /user.js?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63153 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63153 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK

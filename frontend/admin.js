@@ -354,11 +354,13 @@ function demoAuditEntries() {
   });
   return [
     mk(0, 'document-generation', 'approval-note-lora', true, 210, 340),
-    mk(1, 'text-generation', 'qwen2.5:1.5b-instruct', false, 18, 52),
+    mk(1, 'text-generation', 'qwen3:1.7b', false, 18, 52),
     mk(2, 'vision', 'moondream', true, 40, 88),
-    mk(3, 'code-execution', 'qwen2.5:1.5b-instruct', false, 65, 120),
-    mk(4, 'doc-search', 'qwen2.5:1.5b-instruct', false, 95, 60),
-    mk(5, 'document-generation', 'qwen2.5:1.5b-instruct', true, 180, 410),
+    mk(3, 'code-execution', 'qwen3:1.7b', false, 65, 120),
+    mk(4, 'doc-search', 'qwen3:1.7b', false, 95, 60),
+    mk(5, 'document-generation', 'qwen3:1.7b', true, 180, 410),
+    mk(6, 'image-generation', 'sd-turbo', true, 12, 0),
+    mk(7, 'time-series-forecasting', 'moment-1-small', false, 45, 30),
   ];
 }
 

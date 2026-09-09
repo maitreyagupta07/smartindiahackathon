@@ -385,6 +385,8 @@ function routeForModel(modelUsed) {
   const m = modelUsed.toLowerCase();
   if (m.includes('moondream') || m.includes('vision')) return 'vision';
   if (m.includes('lora') || m.includes('approval')) return 'lora';
+  if (m.includes('sd-turbo') || m.includes('stable-diffusion') || m.includes('sd_turbo')) return 'image';
+  if (m.includes('moment')) return 'forecast';
   return 'text';
 }
 

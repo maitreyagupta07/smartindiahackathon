@@ -70,6 +70,8 @@ const TOOL_LABELS = {
   search_docs: 'Document Search',
   generate_file: 'Generate File',
   scan_document: 'Handwritten Document Scan (OCR)',
+  generate_image: 'Image Generation (SD Turbo)',
+  forecast_timeseries: 'Time-Series Forecast (MOMENT-1-small)',
 };
 
 /** Every tool actually called for this task, in call order, with its real
@@ -92,7 +94,15 @@ function toolCallsList(task) {
  *  action/model/status — for the routing node's detailed per-call list. */
 function modelStepsList(task) {
   if (!Array.isArray(task.steps)) return [];
-  return task.steps.filter((s) => s.action === 'call_qwen' || s.action === 'call_moondream');
+  return task.steps.filter((s) =>
+    s.action === 'call_qwen' || s.action === 'call_moondream' ||
+    // generate_image/forecast_timeseries are call_tool steps under the
+    // hood (see app/agent/loop.py's tool_dispatch) but are genuinely
+    // backed by their own real model (SD Turbo / MOMENT-1-small) — the
+    // backend tags model_used on these two specifically (unlike the other
+    // tools), so they belong in the model-call trace too.
+    (s.action === 'call_tool' && (s.tool_name === 'generate_image' || s.tool_name === 'forecast_timeseries'))
+  );
 }
 
 function computeGraphState(task, nowMs) {
@@ -149,7 +159,13 @@ function computeGraphState(task, nowMs) {
 }
 
 function routeLabelFor(branch) {
-  return { text: 'Text · qwen2.5-1.5b', vision: 'Vision · moondream', lora: 'Approval-Note LoRA' }[branch] || null;
+  return {
+    text: 'Text · qwen3-1.7b',
+    vision: 'Vision · moondream',
+    lora: 'Approval-Note LoRA',
+    image: 'Image · SD Turbo',
+    forecast: 'Forecast · MOMENT-1-small',
+  }[branch] || null;
 }
 
 /* ============================================================
@@ -522,9 +538,9 @@ function runDemoSimulation(task) {
     const completed_at = new Date().toISOString();
     const patch = {
       status: 'completed',
-      model_used: 'qwen2.5:1.5b-instruct',
-      models_used: ['qwen2.5:1.5b-instruct'],
-      steps: [{ step_number: 1, action: 'call_qwen', model_used: 'qwen2.5:1.5b-instruct', tool_name: null, status: 'ok' }],
+      model_used: 'qwen3:1.7b',
+      models_used: ['qwen3:1.7b'],
+      steps: [{ step_number: 1, action: 'call_qwen', model_used: 'qwen3:1.7b', tool_name: null, status: 'ok' }],
       completed_at,
       error: null,
       result: {
@@ -875,9 +891,11 @@ function connector(status) {
 function renderGraph(state) {
   const canvas = document.getElementById('graph-canvas');
   const routeBranches = [
-    { key: 'text', label: 'Text → qwen2.5-1.5b' },
+    { key: 'text', label: 'Text → qwen3-1.7b' },
     { key: 'vision', label: 'Vision → moondream' },
     { key: 'lora', label: 'Approval-Note LoRA' },
+    { key: 'image', label: 'Image → SD Turbo' },
+    { key: 'forecast', label: 'Forecast → MOMENT-1-small' },
   ];
   // Always show all three known tools as pill options (dim by default) plus
   // whatever tool the backend actually reported that isn't one of the
@@ -887,6 +905,8 @@ function renderGraph(state) {
     { key: 'execute_code', label: TOOL_LABELS.execute_code },
     { key: 'generate_file', label: TOOL_LABELS.generate_file },
     { key: 'scan_document', label: TOOL_LABELS.scan_document },
+    { key: 'generate_image', label: TOOL_LABELS.generate_image },
+    { key: 'forecast_timeseries', label: TOOL_LABELS.forecast_timeseries },
   ];
   const usedToolKeys = new Set(state.toolCalls.map((c) => c.tool_name));
   const toolBranches = knownTools.concat(
@@ -983,6 +1003,8 @@ function modelModality(model) {
   if (m.includes('moondream')) return 'Vision · image understanding';
   if (m.includes('lora')) return 'Text · fine-tuned approval-note adapter';
   if (m.includes('qwen')) return 'Text · instruction-tuned language model';
+  if (m.includes('sd-turbo') || m.includes('stable-diffusion')) return 'Image · text-to-image generation';
+  if (m.includes('moment')) return 'Time-series · forecasting foundation model';
   return 'Local model';
 }
 
@@ -1020,7 +1042,10 @@ function buildNodePopover(nodeKey, state) {
   if (nodeKey.startsWith('route-')) {
     // MODEL node — one route pill. Uses the real multi-model trace.
     const branch = nodeKey.replace('route-', '');
-    const model = { text: 'qwen2.5:1.5b-instruct', vision: 'moondream', lora: 'approval-note-lora' }[branch] || branch;
+    const model = {
+      text: 'qwen3:1.7b', vision: 'moondream', lora: 'approval-note-lora',
+      image: 'sd-turbo', forecast: 'moment-1-small',
+    }[branch] || branch;
     const isUsed = state.routingBranches.includes(branch);
     const modelsOnBranch = state.modelSteps.filter((s) => routeForModel(s.model_used) === branch);
     eyebrow = 'Model';
@@ -1996,6 +2021,8 @@ const PreviewPanel = {
     const raw = absUrl(payload.raw_url);
     if (payload.mode === 'pdf' && raw) {
       body.innerHTML = `<iframe class="preview-frame" src="${escapeHtml(raw)}" title="Document preview"></iframe>`;
+    } else if (payload.mode === 'image' && raw) {
+      body.innerHTML = `<div class="preview-image-wrap"><img src="${escapeHtml(raw)}" alt="Generated image" style="max-width:100%;height:auto;display:block;margin:0 auto"></div>`;
     } else if (payload.mode === 'html') {
       body.innerHTML = `<div class="preview-doc">${payload.html || ''}</div>`;
     } else if (payload.mode === 'text') {
@@ -2030,6 +2057,14 @@ const PreviewPanel = {
     this._show(name);
     if (/\.pdf($|\?)/i.test(name) || /\.pdf($|\?)/i.test(fileUrl)) {
       this._renderPayload({ mode: 'pdf', raw_url: fileUrl });
+      return;
+    }
+    if (/\.(png|jpe?g|webp|gif)($|\?)/i.test(name) || /\.(png|jpe?g|webp|gif)($|\?)/i.test(fileUrl)) {
+      // A generated image (SD Turbo) is just a static file — render it
+      // directly client-side, same as PDF above, no backend round-trip
+      // needed (unlike docx/pptx/xlsx, which do need server-side
+      // rendering into HTML/text via Api.previewGenerated).
+      this._renderPayload({ mode: 'image', raw_url: fileUrl });
       return;
     }
     if (!LIVE_BACKEND) { this._error('Backend not detected — preview is unavailable.'); return; }

@@ -1,0 +1,8 @@
+=== Sovereign On-Premise Agentic AI Workbench ===
+[ok] Ollama already running on localhost:11434
+[ok] Docker reachable (code-execution sandbox available)
+[..] Starting the Workbench API on 0.0.0.0:8000...
+
+    Local:  http://localhost:8000/
+    LAN:    http://172.16.0.2:8000/
+

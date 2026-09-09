@@ -1,0 +1,41 @@
++ set -euo pipefail
+++ dirname run.sh
++ cd .
++ PY=python3
++ command -v python3
++ VENV_BIN=.venv/bin
++ '[' -d .venv/bin ']'
++ VENV_BIN=.venv/Scripts
+++ python3 -c 'import json; print(json.load(open('\''config.json'\''))['\''ports'\'']['\''backend'\''])'
++ PORT=8000
++ echo '=== Sovereign On-Premise Agentic AI Workbench ==='
+=== Sovereign On-Premise Agentic AI Workbench ===
++ curl -s -o /dev/null --max-time 2 http://127.0.0.1:11434/api/tags
++ echo '[ok] Ollama already running on localhost:11434'
+[ok] Ollama already running on localhost:11434
++ docker info
++ echo '[ok] Docker reachable (code-execution sandbox available)'
+[ok] Docker reachable (code-execution sandbox available)
++ '[' '!' -d .venv ']'
+++ hostname -I
+++ awk '{print $1}'
++ LAN_IP=
++ LAN_IP=
++ '[' -z '' ']'
+++ python3 -c 'import socket; s=socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(('\''8.8.8.8'\'', 80)); print(s.getsockname()[0])'
++ LAN_IP=172.16.0.2
++ echo '[..] Starting the Workbench API on 0.0.0.0:8000...'
+[..] Starting the Workbench API on 0.0.0.0:8000...
++ echo
+
++ echo '    Local:  http://localhost:8000/'
+    Local:  http://localhost:8000/
++ echo '    LAN:    http://172.16.0.2:8000/'
+    LAN:    http://172.16.0.2:8000/
++ echo
+
++ exec ./.venv/Scripts/uvicorn app.main:app --host 0.0.0.0 --port 8000
+INFO:     Started server process [28872]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)

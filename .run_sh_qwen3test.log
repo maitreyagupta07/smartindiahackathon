@@ -1,0 +1,226 @@
+=== Sovereign On-Premise Agentic AI Workbench ===
+[ok] Ollama already running on localhost:11434
+[ok] Docker reachable (code-execution sandbox available)
+[..] Starting the Workbench API on 0.0.0.0:8000...
+
+    Local:  http://localhost:8000/
+    LAN:    http://172.16.0.2:8000/
+
+INFO:     Started server process [30064]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:64883 - "GET /health HTTP/1.1" 200 OK
+[LOOP] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a START prompt='Write one sentence about pump maintenance.' has_file=False chat_id=None
+[ROUTER] task_type=text-generation first_model=qwen3:1.7b needs_reasoning=False confidence=0.0 multi_step=False workflow=None matched=[] all_scores={'code-execution': 0.0, 'doc-search': 0.0, 'document-generation': 0.0}
+[PLANNER] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a step0 -> call_qwen model=qwen3:1.7b (text entry point)
+[LOOP] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a step=1 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:60565 - "POST /api/submit-task HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60571 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60590 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60610 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60630 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60650 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60652 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60656 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='Regular inspection, cleaning, lubrication, and timely repairs are essential to ensure optimal performance and prevent un'
+[LOOP] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a model=qwen3:1.7b response_preview='Regular inspection, cleaning, lubrication, and timely repairs are essential to ensure optimal performance and prevent un' tokens=prompt:17/completion:215
+[STATE] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a step=1 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a qwen observed -> finalize
+[LOOP] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a step=2 planned_action=finalize model=None tool=None
+[LOOP] task_id=c6fbc121-3a88-4a69-b22b-57a924517c7a END status=completed final_model=qwen3:1.7b steps_run=1
+INFO:     127.0.0.1:60659 - "GET /api/task-status/c6fbc121-3a88-4a69-b22b-57a924517c7a HTTP/1.1" 200 OK
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 START prompt='hello what is ur name' has_file=False chat_id='589958d9-7343-4f4d-a7fe-467c34f9d005'
+[ROUTER] chat_id='589958d9-7343-4f4d-a7fe-467c34f9d005' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 step0 -> call_tool(search_docs) chat_id='589958d9-7343-4f4d-a7fe-467c34f9d005' user_id='idk' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 calling tool=search_docs args={'query': 'hello what is ur name', 'top_k': 5, 'chat_id': '589958d9-7343-4f4d-a7fe-467c34f9d005', 'user_id': 'idk'}
+[TOOLS] search_docs query='hello what is ur name' top_k=5 chat_id='589958d9-7343-4f4d-a7fe-467c34f9d005' user_id='idk'
+INFO:     127.0.0.1:58522 - "POST /api/chat/589958d9-7343-4f4d-a7fe-467c34f9d005/message HTTP/1.1" 200 OK
+[docsearch] opening persistent Chroma index at: C:\Users\Guransh Rally\smartindiahackathon\tools\chroma_db
+INFO:     127.0.0.1:58522 - "GET /api/task-status/43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 HTTP/1.1" 200 OK
+[docsearch] chat KB collection 'chat_kb' loaded, 0 chunk(s) already persisted on disk
+[docsearch] global KB collection 'global_kb' loaded, 0 chunk(s) already persisted on disk
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:58522 - "GET /api/task-status/43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58522 - "GET /api/task-status/43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58522 - "GET /api/task-status/43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='The knowledge base does not contain any information about my name or identity. Therefore, I cannot provide a specific an'
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 model=qwen3:1.7b response_preview='The knowledge base does not contain any information about my name or identity. Therefore, I cannot provide a specific an' tokens=prompt:117/completion:156
+[STATE] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 qwen observed -> finalize
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:58522 - "GET /api/task-status/43b0e1ca-8d6e-4fa7-9776-51c5e8bf5502 HTTP/1.1" 200 OK
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 START prompt='hello who are you' has_file=False chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9'
+[ROUTER] chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=b71a3c29-8155-48f4-993e-f451d0737901 step0 -> call_tool(search_docs) chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 calling tool=search_docs args={'query': 'hello who are you', 'top_k': 5, 'chat_id': '566275bd-3826-4ff5-8072-cde0f411a2e9', 'user_id': 'idk'}
+[TOOLS] search_docs query='hello who are you' top_k=5 chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk'
+INFO:     127.0.0.1:64788 - "POST /api/chat/566275bd-3826-4ff5-8072-cde0f411a2e9/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=b71a3c29-8155-48f4-993e-f451d0737901 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=b71a3c29-8155-48f4-993e-f451d0737901 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 model=qwen3:1.7b ERROR: 'charmap' codec can't encode character '\U0001f60a' in position 176: character maps to <undefined>
+[STATE] task_id=b71a3c29-8155-48f4-993e-f451d0737901 step=2 action=call_qwen tool=None model=qwen3:1.7b status=error
+[PLANNER] task_id=b71a3c29-8155-48f4-993e-f451d0737901 last step errored -> finalize
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=b71a3c29-8155-48f4-993e-f451d0737901 END status=failed error="'charmap' codec can't encode character '\\U0001f60a' in position 176: character maps to <undefined>"
+INFO:     127.0.0.1:64788 - "GET /api/task-status/b71a3c29-8155-48f4-993e-f451d0737901 HTTP/1.1" 200 OK
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b START prompt='hi' has_file=False chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9'
+[ROUTER] chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b step0 -> call_tool(search_docs) chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b calling tool=search_docs args={'query': 'hi', 'top_k': 5, 'chat_id': '566275bd-3826-4ff5-8072-cde0f411a2e9', 'user_id': 'idk'}
+[TOOLS] search_docs query='hi' top_k=5 chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk'
+INFO:     127.0.0.1:49967 - "POST /api/chat/566275bd-3826-4ff5-8072-cde0f411a2e9/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:49967 - "GET /api/task-status/a8f78484-e01a-4d8c-84d9-bdb9856dff7b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49967 - "GET /api/task-status/a8f78484-e01a-4d8c-84d9-bdb9856dff7b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49967 - "GET /api/task-status/a8f78484-e01a-4d8c-84d9-bdb9856dff7b HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='Hello! Here\'s an example of how you might respond:  \n**"Hi! I\'m [Your Name], and I\'ll do my best to help with whatever y'
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b model=qwen3:1.7b response_preview='Hello! Here\'s an example of how you might respond:  \n**"Hi! I\'m [Your Name], and I\'ll do my best to help with whatever y' tokens=prompt:113/completion:266
+[STATE] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b qwen observed -> finalize
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=a8f78484-e01a-4d8c-84d9-bdb9856dff7b END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:49967 - "GET /api/task-status/a8f78484-e01a-4d8c-84d9-bdb9856dff7b HTTP/1.1" 200 OK
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 START prompt='how many r in the word strawberry' has_file=False chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9'
+[ROUTER] chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 step0 -> call_tool(search_docs) chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 calling tool=search_docs args={'query': 'how many r in the word strawberry', 'top_k': 5, 'chat_id': '566275bd-3826-4ff5-8072-cde0f411a2e9', 'user_id': 'idk'}
+[TOOLS] search_docs query='how many r in the word strawberry' top_k=5 chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk'
+INFO:     127.0.0.1:63520 - "POST /api/chat/566275bd-3826-4ff5-8072-cde0f411a2e9/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:63520 - "GET /api/task-status/219d6f9d-4952-40f2-94d3-8b65340f26b5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63520 - "GET /api/task-status/219d6f9d-4952-40f2-94d3-8b65340f26b5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63520 - "GET /api/task-status/219d6f9d-4952-40f2-94d3-8b65340f26b5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63520 - "GET /api/task-status/219d6f9d-4952-40f2-94d3-8b65340f26b5 HTTP/1.1" 200 OK
+[INFERENCE_CLIENT] <- model=qwen3:1.7b response_preview='The word "strawberry" contains **2** letters \'r\'. \n\nBreaking it down:  \n- The first \'r\' is in position 3 (S-T-R-A-W-B-E-'
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 model=qwen3:1.7b response_preview='The word "strawberry" contains **2** letters \'r\'. \n\nBreaking it down:  \n- The first \'r\' is in position 3 (S-T-R-A-W-B-E-' tokens=prompt:194/completion:249
+[STATE] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 step=2 action=call_qwen tool=None model=qwen3:1.7b status=ok
+[PLANNER] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 qwen observed -> finalize
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=219d6f9d-4952-40f2-94d3-8b65340f26b5 END status=completed final_model=qwen3:1.7b steps_run=2
+INFO:     127.0.0.1:63520 - "GET /api/task-status/219d6f9d-4952-40f2-94d3-8b65340f26b5 HTTP/1.1" 200 OK
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 START prompt='check again u dumb piece of shit' has_file=False chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9'
+[ROUTER] chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 step0 -> call_tool(search_docs) chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 calling tool=search_docs args={'query': 'check again u dumb piece of shit', 'top_k': 5, 'chat_id': '566275bd-3826-4ff5-8072-cde0f411a2e9', 'user_id': 'idk'}
+[TOOLS] search_docs query='check again u dumb piece of shit' top_k=5 chat_id='566275bd-3826-4ff5-8072-cde0f411a2e9' user_id='idk'
+INFO:     127.0.0.1:65325 - "POST /api/chat/566275bd-3826-4ff5-8072-cde0f411a2e9/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:65325 - "GET /api/task-status/4f7e461a-53b8-480a-a1f2-65cecb992fb1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65325 - "GET /api/task-status/4f7e461a-53b8-480a-a1f2-65cecb992fb1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65325 - "GET /api/task-status/4f7e461a-53b8-480a-a1f2-65cecb992fb1 HTTP/1.1" 200 OK
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 model=qwen3:1.7b ERROR: 'charmap' codec can't encode character '\U0001f60a' in position 139: character maps to <undefined>
+[STATE] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 step=2 action=call_qwen tool=None model=qwen3:1.7b status=error
+[PLANNER] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 last step errored -> finalize
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=4f7e461a-53b8-480a-a1f2-65cecb992fb1 END status=failed error="'charmap' codec can't encode character '\\U0001f60a' in position 139: character maps to <undefined>"
+INFO:     127.0.0.1:65325 - "GET /api/task-status/4f7e461a-53b8-480a-a1f2-65cecb992fb1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57837 - "GET / HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:57837 - "GET /styles.css?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:52618 - "GET /app.js?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:53409 - "GET /user.js?v=20260918 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53409 - "GET /login.html?next= HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:53409 - "GET /styles.css?v=20260917 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:53409 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:56594 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56594 - "GET /user.js?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:56594 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56594 - "GET /api/kb/list?user_id=idk HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56298 - "GET /login.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56298 - "GET /signup.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63786 - "GET /index.html HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63786 - "GET /user.js?v=20260918 HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63786 - "GET /api/audit-log HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/kb/list?user_id=qwen_nigga HTTP/1.1" 200 OK
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a START prompt='Hello' has_file=False chat_id='c0880044-92b4-4fbd-a9fe-cb975a161cec'
+[ROUTER] chat_id='c0880044-92b4-4fbd-a9fe-cb975a161cec' -> task_type=chat first_model=qwen3:1.7b (no actionable signal in message — treated as a KB/conversation question)
+[PLANNER] task_id=03145156-06c3-45e8-b916-2dd80f21031a step0 -> call_tool(search_docs) chat_id='c0880044-92b4-4fbd-a9fe-cb975a161cec' user_id='qwen_nigga' top_k=5 (chat uploads + operator global KB retrieval)
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a step=1 planned_action=call_tool model=None tool=search_docs
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a calling tool=search_docs args={'query': 'Hello', 'top_k': 5, 'chat_id': 'c0880044-92b4-4fbd-a9fe-cb975a161cec', 'user_id': 'qwen_nigga'}
+[TOOLS] search_docs query='Hello' top_k=5 chat_id='c0880044-92b4-4fbd-a9fe-cb975a161cec' user_id='qwen_nigga'
+INFO:     127.0.0.1:63786 - "POST /api/chat/c0880044-92b4-4fbd-a9fe-cb975a161cec/message HTTP/1.1" 200 OK
+[TOOLS] search_docs result_count=0
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a tool=search_docs OBSERVATION={'results': []}
+[STATE] task_id=03145156-06c3-45e8-b916-2dd80f21031a step=1 action=call_tool tool=search_docs model=None status=ok
+[PLANNER] task_id=03145156-06c3-45e8-b916-2dd80f21031a chat KB retrieval observed (0 source(s)) -> chaining to call_qwen with conversation context
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a step=2 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a model=qwen3:1.7b ERROR: 'charmap' codec can't encode character '\U0001f60a' in position 92: character maps to <undefined>
+[STATE] task_id=03145156-06c3-45e8-b916-2dd80f21031a step=2 action=call_qwen tool=None model=qwen3:1.7b status=error
+[PLANNER] task_id=03145156-06c3-45e8-b916-2dd80f21031a last step errored -> finalize
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a step=3 planned_action=finalize model=None tool=None
+[LOOP] task_id=03145156-06c3-45e8-b916-2dd80f21031a END status=failed error="'charmap' codec can't encode character '\\U0001f60a' in position 92: character maps to <undefined>"
+INFO:     127.0.0.1:63786 - "GET /api/task-status/03145156-06c3-45e8-b916-2dd80f21031a HTTP/1.1" 200 OK
+[LOOP] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 START prompt='Hello' has_file=False chat_id=None
+[ROUTER] task_type=text-generation first_model=qwen3:1.7b needs_reasoning=False confidence=0.0 multi_step=False workflow=None matched=[] all_scores={'code-execution': 0.0, 'doc-search': 0.0, 'document-generation': 0.0}
+[PLANNER] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 step0 -> call_qwen model=qwen3:1.7b (text entry point)
+[LOOP] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 step=1 planned_action=call_qwen model=qwen3:1.7b tool=None
+[INFERENCE_CLIENT] -> model=qwen3:1.7b url=http://localhost:11434/api/generate has_image=False
+INFO:     127.0.0.1:62386 - "POST /api/submit-task HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62395 - "GET /api/task-status/76bf9a2d-bbfb-4126-9611-b66f304de3b7 HTTP/1.1" 200 OK
+[LOOP] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 model=qwen3:1.7b ERROR: 'charmap' codec can't encode character '\U0001f60a' in position 92: character maps to <undefined>
+[STATE] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 step=1 action=call_qwen tool=None model=qwen3:1.7b status=error
+[PLANNER] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 last step errored -> finalize
+[LOOP] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 step=2 planned_action=finalize model=None tool=None
+[LOOP] task_id=76bf9a2d-bbfb-4126-9611-b66f304de3b7 END status=failed error="'charmap' codec can't encode character '\\U0001f60a' in position 92: character maps to <undefined>"
+INFO:     127.0.0.1:62398 - "GET /api/task-status/76bf9a2d-bbfb-4126-9611-b66f304de3b7 HTTP/1.1" 200 OK

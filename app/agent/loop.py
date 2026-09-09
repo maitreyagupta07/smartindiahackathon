@@ -29,8 +29,16 @@ from .planner import (
     strip_markdown_emphasis,
 )
 from ..inference.client import call_inference
-from ..tools.facade import execute_code, search_docs, generate_file, scan_document
+from ..tools.facade import execute_code, search_docs, generate_file, scan_document, generate_image, forecast_timeseries
+from ..router.model_registry import IMAGE_MODEL, TIMESERIES_MODEL
 from ..schemas.task import ExecuteTaskRequest, ExecuteTaskResponse, TaskResult
+
+# generate_image/forecast_timeseries are genuinely backed by a real local
+# model (SD Turbo / MOMENT-1-small) unlike the other four tools (plain code
+# execution, doc search, file writing, OCR) — worth surfacing as
+# `model_used`/models_used, same as call_qwen/call_moondream steps do,
+# instead of the None every other tool call correctly passes.
+_TOOL_MODEL_LABELS = {"generate_image": IMAGE_MODEL, "forecast_timeseries": TIMESERIES_MODEL}
 
 _FILEGEN_MARKERS = (FILEGEN_CODE_MARKER, FILEGEN_CONTENT_MARKER)
 
@@ -69,6 +77,8 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
         "search_docs": search_docs,
         "generate_file": generate_file,
         "scan_document": scan_document,
+        "generate_image": generate_image,
+        "forecast_timeseries": forecast_timeseries,
     }
 
     state = TaskState(
@@ -182,7 +192,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                     print(f"[LOOP] task_id={state.task_id} tool={next_step.tool_name} OBSERVATION={tool_result}")
                     state.add_step(
                         action="call_tool",
-                        model_used=None,
+                        model_used=_TOOL_MODEL_LABELS.get(next_step.tool_name),
                         prompt_used=str(tool_args),
                         observation=tool_result,
                         status="ok",
@@ -232,12 +242,15 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 token_usage=state.token_totals,
             )
 
-        # File-generation tasks finalize straight off generate_file's
-        # observation — the file itself is the deliverable, not model text.
+        # File-generation tasks finalize straight off generate_file's/
+        # generate_image's observation — the file itself is the
+        # deliverable, not model text. Both tools populate
+        # state.file_url/file_name/generated_files identically (see
+        # planner.py), so one check covers both.
         if (
             last_step
             and last_step.action == "call_tool"
-            and last_step.tool_name == "generate_file"
+            and last_step.tool_name in ("generate_file", "generate_image")
             and last_step.status == "ok"
         ):
             # state.file_url/file_name (back-compat, always the FIRST file)
