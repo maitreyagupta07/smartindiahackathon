@@ -76,3 +76,19 @@ MAX_CONCURRENT_TASKS = int(_RAW.get("backend", {}).get("max_concurrent_tasks", 2
 # fixed default so a mid-range single GPU never gets more than one
 # simultaneous vision inference.
 MAX_CONCURRENT_VISION_TASKS = int(_RAW.get("backend", {}).get("max_concurrent_vision_tasks", 1))
+
+# Person E's application-level network monitor (app/monitor/network.py).
+# Everything here is an allow-policy input, not a binding target — the
+# monitor only ever READS this machine's own socket table. Obsolete
+# service ports (8001/8002) are deliberately absent: those processes no
+# longer exist in the single-node build.
+_NM = _RAW.get("network_monitor", {}) if isinstance(_RAW.get("network_monitor"), dict) else {}
+NETWORK_MONITOR = {
+    "app_port": int(_NM.get("app_port", BACKEND_PORT)),
+    "ollama_port": int(_NM.get("ollama_port", INFERENCE_PORT)),
+    # Known frontend/client machine(s) on the venue LAN — traffic to/from
+    # these is expected (LAN_CLIENT), never a violation.
+    "expected_client_ips": [str(ip) for ip in _NM.get("expected_client_ips", []) if ip],
+    # This machine's own LAN address (the ":8000" the client connects to).
+    "expected_lan_server_ip": _NM.get("expected_lan_server_ip") or None,
+}

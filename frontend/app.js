@@ -175,6 +175,24 @@ const Api = {
     return body;
   },
 
+  /* ---- Network-security monitor (Person E) — admin Security & Sovereignty ---- */
+
+  /** Current/global sweep of this machine's own outbound TCP connections. */
+  async getNetworkStatus() {
+    const res = await fetch(`${API_BASE}/api/network-status`);
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `network-status failed (${res.status})`);
+    return body;
+  },
+
+  /** Network-security record accumulated for one task (start + end sample). */
+  async getTaskNetworkStatus(taskId) {
+    const res = await fetch(`${API_BASE}/api/network-status/${encodeURIComponent(taskId)}`);
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `task network-status failed (${res.status})`);
+    return body;
+  },
+
   /** Probe the real backend once, briefly, so the UI can honestly signal live-vs-demo mode. */
   async probe(timeoutMs = 1500) {
     try {

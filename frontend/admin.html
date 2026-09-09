@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sovereign AI Operations</title>
-<link rel="stylesheet" href="styles.css?v=20260917">
+<link rel="stylesheet" href="styles.css?v=20260919">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -268,7 +268,7 @@
         <section id="tab-resources" style="flex-direction:column;gap:20px">
           <span class="section-label">System Resources</span>
           <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:0">
-            <div class="kv-row"><span class="k">GPU</span><span class="v">RTX 3050 (4GB VRAM)</span></div>
+            <div class="kv-row"><span class="k">GPU</span><span class="v">RTX 4060 (8GB VRAM)</span></div>
             <div class="kv-row"><span class="k">Serving Runtime</span><span class="v">Ollama / llama.cpp (Q4 quantized)</span></div>
             <div class="kv-row"><span class="k">Text Model Footprint</span><span class="v">~0.9–1.0 GB VRAM</span></div>
             <div class="kv-row"><span class="k">Vision Model Footprint</span><span class="v">~1.7–1.8 GB VRAM</span></div>
@@ -321,6 +321,49 @@
             <div class="capability-badge"><iconify-icon icon="lucide:check-circle"></iconify-icon>Single LAN-exposed port</div>
           </div>
           <p style="font-size:11.5px;color:var(--text-muted);max-width:600px">This diagram reflects the single-node architecture — one process on :8000 is the only thing ever reachable from the LAN; Ollama and the Docker sandbox stay internal. Independent, OS-level verification (Wireshark/Resource Monitor) remains the ultimate proof for a live demo — the panel below is this app's own honest self-report, not a packet capture.</p>
+
+          <span class="section-label">Network Monitor &mdash; Outbound Egress (Person E)</span>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:640px">A live application-level sweep of <em>this machine's own</em> established TCP connections, classified against the no-external-egress policy (loopback incl. Ollama :11434 = LOCAL; RFC1918 / the known client = LAN&#47;CLIENT; anything publicly routable = EXTERNAL &rarr; policy violation). This is an <strong>evidence</strong> statement about the current sweep, not a claim of "zero external calls ever" &mdash; Wireshark stays the independent packet-level check and does not carry task IDs.</p>
+          <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:16px">
+            <div class="netmon-status unknown" id="netmon-status">
+              <iconify-icon icon="lucide:loader"></iconify-icon>
+              <span id="netmon-status-text">Checking…</span>
+            </div>
+            <div class="stat-grid">
+              <div class="stat-block">
+                <div class="label">External Connections Observed</div>
+                <div class="value" id="netmon-ext-conns">—</div>
+                <div class="sub"><iconify-icon icon="lucide:arrow-up-right"></iconify-icon>OUTBOUND · PUBLIC</div>
+              </div>
+              <div class="stat-block">
+                <div class="label">External / Public IPs Observed</div>
+                <div class="value" id="netmon-ext-ips">—</div>
+                <div class="sub"><iconify-icon icon="lucide:globe"></iconify-icon>DISTINCT</div>
+              </div>
+              <div class="stat-block">
+                <div class="label">Policy Violations</div>
+                <div class="value" id="netmon-violations">—</div>
+                <div class="sub"><iconify-icon icon="lucide:shield-alert"></iconify-icon>NON-LOOPBACK · NON-LAN</div>
+              </div>
+            </div>
+            <div id="netmon-ext-ip-list" class="mono" style="font-size:11px;color:var(--error)" hidden></div>
+            <div id="netmon-detail" style="font-size:11px;color:var(--text-muted)" hidden></div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text-muted)">
+              <span>Last checked: <span class="mono" id="netmon-last-checked">—</span></span>
+              <button class="export-btn" id="netmon-refresh" style="padding:5px 12px"><iconify-icon icon="lucide:refresh-cw"></iconify-icon>Re-check now</button>
+            </div>
+          </div>
+
+          <span class="section-label">Per-Task Network Status</span>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:640px">Application-level correlation only: the monitor is sampled at a task's start and end and tagged with its <span class="mono">task_id</span> &mdash; concurrent tasks each keep their own record. Paste a <span class="mono">task_id</span> from the Task Activity tab.</p>
+          <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input type="text" id="netmon-task-input" placeholder="task_id" autocomplete="off"
+                style="flex:1;min-width:220px;padding:8px 10px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--elevated-surface);color:var(--text-primary);font-family:'JetBrains Mono',monospace;font-size:12px">
+              <button class="export-btn" id="netmon-task-check" style="padding:6px 14px"><iconify-icon icon="lucide:search"></iconify-icon>Check task</button>
+            </div>
+            <div id="netmon-task-result" style="font-size:12px"></div>
+          </div>
 
           <span class="section-label">Live Client Connections &amp; Token Usage</span>
           <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:600px">Real data from the audit log — the actual source IP FastAPI saw on each request (not anything the browser claims about itself), and real token counts straight from Ollama's own response (<span class="mono">prompt_eval_count</span>/<span class="mono">eval_count</span>), never estimated.</p>
@@ -404,7 +447,7 @@
   </div>
 </template>
 
-<script src="app.js?v=20260917"></script>
+<script src="app.js?v=20260919"></script>
 <script>
   AdminAuth.guard(); // redirects to admin-login.html immediately if no active admin session
   document.getElementById('admin-logout').addEventListener('click', (e) => {
@@ -416,6 +459,6 @@
   const tpl = document.getElementById('audit-table-template');
   document.getElementById('audit-table-panel').appendChild(tpl.content.cloneNode(true));
 </script>
-<script src="admin.js?v=20260910"></script>
+<script src="admin.js?v=20260919"></script>
 </body>
 </html>

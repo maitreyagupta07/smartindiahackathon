@@ -16,8 +16,18 @@ from typing import Optional
 
 from ..agent.loop import run_agent_loop
 from ..audit.log import now_iso, write_audit_entry
+from ..monitor import network as network_monitor
 from ..schemas.task import ExecuteTaskRequest
 from ..storage.config import MAX_CONCURRENT_TASKS, MAX_CONCURRENT_VISION_TASKS
+
+
+async def _record_task_network(task_id: str, phase: str) -> None:
+    """Fold a network-monitor sample into this task's per-task record.
+    Wrapped so a monitoring failure can never affect task execution."""
+    try:
+        await network_monitor.record_task_window(task_id, phase)
+    except Exception:  # noqa: BLE001
+        pass
 
 # In-memory task store: task_id -> dict matching §2.3 GET /api/task-status shape
 TASKS: dict[str, dict] = {}
@@ -85,6 +95,10 @@ async def dispatch_to_agent(
             TASKS[task_id]["started_at"] = now_iso()
             TASKS[task_id]["client_ip"] = client_ip
 
+        # Per-task network-security correlation (Person E's monitor). Keyed
+        # by task_id, concurrency-safe, no shared "current task" state.
+        await _record_task_network(task_id, "start")
+
         try:
             req = ExecuteTaskRequest(
                 task_id=task_id,
@@ -108,6 +122,7 @@ async def dispatch_to_agent(
                 model_used="none", file_uploaded=file_base64 is not None,
                 client_ip=client_ip,
             )
+            await _record_task_network(task_id, "end")
             return
 
         async with TASK_LOCK:
@@ -143,3 +158,4 @@ async def dispatch_to_agent(
             prompt_tokens=token_usage.get("prompt_tokens"),
             completion_tokens=token_usage.get("completion_tokens"),
         )
+        await _record_task_network(task_id, "end")
