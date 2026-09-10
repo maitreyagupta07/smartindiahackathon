@@ -22,5 +22,16 @@
     "ollama_port": 11434,
     "expected_client_ips": ["172.16.213.52"],
     "expected_lan_server_ip": "172.16.215.253"
+  },
+  "egress_firewall": {
+    "enabled": true,
+    "extra_allowed_cidrs": [],
+    "extra_allowed_ips": [],
+    "self_test_targets": [
+      ["8.8.8.8", 53],
+      ["1.1.1.1", 443],
+      ["api.openai.com", 443],
+      ["huggingface.co", 443]
+    ]
   }
 }

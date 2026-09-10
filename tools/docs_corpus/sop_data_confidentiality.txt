@@ -1,4 +1,4 @@
-SOP: Handling of Confidential Plant Data with AI-Assisted Tools
+it SOP: Handling of Confidential Plant Data with AI-Assisted Tools
 
 DOCUMENT ID: SOP-AI-03
 REVISION: 2  (effective 2025-12-01)

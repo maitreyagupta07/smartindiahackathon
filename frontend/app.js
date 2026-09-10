@@ -193,6 +193,25 @@ const Api = {
     return body;
   },
 
+  /* ---- Egress firewall (enforcement layer) — admin Security & Sovereignty ---- */
+
+  /** Current state of the in-process egress firewall: enforcing flag,
+   *  allow-list, and the live log of blocked off-LAN connection attempts. */
+  async getEgressFirewall() {
+    const res = await fetch(`${API_BASE}/api/egress-firewall`);
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `egress-firewall failed (${res.status})`);
+    return body;
+  },
+
+  /** Actively probe public endpoints and confirm each is refused. */
+  async runEgressSelfTest() {
+    const res = await fetch(`${API_BASE}/api/egress-firewall/self-test`, { method: 'POST' });
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.error || `egress self-test failed (${res.status})`);
+    return body;
+  },
+
   /** Probe the real backend once, briefly, so the UI can honestly signal live-vs-demo mode. */
   async probe(timeoutMs = 1500) {
     try {

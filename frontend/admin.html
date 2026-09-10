@@ -322,6 +322,56 @@
           </div>
           <p style="font-size:11.5px;color:var(--text-muted);max-width:600px">This diagram reflects the single-node architecture — one process on :8000 is the only thing ever reachable from the LAN; Ollama and the Docker sandbox stay internal. Independent, OS-level verification (Wireshark/Resource Monitor) remains the ultimate proof for a live demo — the panel below is this app's own honest self-report, not a packet capture.</p>
 
+          <span class="section-label">Egress Firewall &mdash; LAN-Only Enforcement</span>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:640px">This is the <strong>enforcement</strong> layer, not a report. An in-process guard on <span class="mono">socket.connect()</span> refuses <em>any</em> outbound connection from this app to a publicly routable address before a packet leaves &mdash; a cloud SDK phoning home, a model-weights download, a telemetry beacon. Loopback (incl. Ollama&nbsp;:11434), RFC1918 / link-local, and the configured LAN peers pass through untouched. The monitor below is then the independent witness that the policy is holding.</p>
+          <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:16px">
+            <div class="netmon-status unknown" id="efw-status">
+              <iconify-icon icon="lucide:loader"></iconify-icon>
+              <span id="efw-status-text">Checking&hellip;</span>
+            </div>
+            <div class="stat-grid">
+              <div class="stat-block">
+                <div class="label">Off-LAN Attempts Blocked</div>
+                <div class="value" id="efw-blocked-total">&mdash;</div>
+                <div class="sub"><iconify-icon icon="lucide:shield-x"></iconify-icon>SINCE STARTUP</div>
+              </div>
+              <div class="stat-block">
+                <div class="label">LAN / Loopback Connections Allowed</div>
+                <div class="value" id="efw-allowed-total">&mdash;</div>
+                <div class="sub"><iconify-icon icon="lucide:shield-check"></iconify-icon>PERMITTED BY POLICY</div>
+              </div>
+              <div class="stat-block">
+                <div class="label">Last Blocked</div>
+                <div class="value mono" id="efw-last-blocked" style="font-size:13px">&mdash;</div>
+                <div class="sub"><iconify-icon icon="lucide:clock"></iconify-icon>MOST RECENT</div>
+              </div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Always-allowed ranges (everything else is refused):</div>
+              <div id="efw-allowlist" class="mono" style="font-size:11px;color:var(--text-secondary);display:flex;flex-wrap:wrap;gap:6px"></div>
+            </div>
+            <div>
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+                <button class="export-btn" id="efw-self-test" style="padding:6px 14px"><iconify-icon icon="lucide:radar"></iconify-icon>Run isolation self-test</button>
+                <span style="font-size:11px;color:var(--text-muted)">Actively tries to reach public DNS, a cloud LLM API, and a model host &mdash; every row must come back <strong>BLOCKED</strong>.</span>
+              </div>
+              <div id="efw-self-test-result" style="font-size:12px"></div>
+            </div>
+            <div id="efw-blocked-log-wrap" hidden>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Recent blocked attempts:</div>
+              <div style="overflow-x:auto">
+                <table class="data-table" style="font-size:11px;min-width:520px">
+                  <thead><tr><th>Time (UTC)</th><th>Destination</th><th>Tried by</th></tr></thead>
+                  <tbody id="efw-blocked-log"></tbody>
+                </table>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--text-muted)">
+              <span>Last checked: <span class="mono" id="efw-last-checked">&mdash;</span></span>
+              <button class="export-btn" id="efw-refresh" style="padding:5px 12px"><iconify-icon icon="lucide:refresh-cw"></iconify-icon>Re-check now</button>
+            </div>
+          </div>
+
           <span class="section-label">Network Monitor &mdash; Outbound Egress (Person E)</span>
           <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:640px">A live application-level sweep of <em>this machine's own</em> established TCP connections, classified against the no-external-egress policy (loopback incl. Ollama :11434 = LOCAL; RFC1918 / the known client = LAN&#47;CLIENT; anything publicly routable = EXTERNAL &rarr; policy violation). This is an <strong>evidence</strong> statement about the current sweep, not a claim of "zero external calls ever" &mdash; Wireshark stays the independent packet-level check and does not carry task IDs.</p>
           <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:16px">

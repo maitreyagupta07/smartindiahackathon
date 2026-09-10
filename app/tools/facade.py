@@ -7,7 +7,7 @@ process after the single-node refactor; app/agent/loop.py now calls these
 functions directly (same names, same argument shapes, same return shapes —
 callers did not need to change).
 
-Every underlying tools function (sandbox.run_code, docsearch.search_docs /
+Every underlying tools function (zx.run_code, docsearch.search_docs /
 search_chat_docs, filegen.generate_file) is synchronous, blocking Python —
 real Docker API calls, ChromaDB queries, python-docx/openpyxl file writes —
 wrapped in asyncio.to_thread() here so a slow tool call can't stall the

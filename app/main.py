@@ -44,7 +44,28 @@ from .api.chat import router as chat_router
 from .api.knowledge import router as knowledge_router
 from .api.network import router as network_router
 from .audit.log import init_db
-from .storage.config import FILES_DIR, REPO_ROOT
+from .security import egress_firewall
+from .storage.config import EGRESS_FIREWALL, FILES_DIR, REPO_ROOT
+
+# Install the in-process egress firewall as early as possible — before the
+# routers, the audit DB, or the inference client get a chance to open a
+# socket. From here on, any outbound connection from THIS process to a
+# non-LAN / publicly routable address is refused at connect() time and
+# recorded (see app/security/egress_firewall.py). Loopback (incl. Ollama
+# on 127.0.0.1:11434), RFC1918 / link-local, and the configured LAN peers
+# keep working normally. This is the enforcement counterpart to the
+# read-only sweep in app/monitor/network.py.
+_ef_status = egress_firewall.install(
+    enabled=EGRESS_FIREWALL["enabled"],
+    extra_cidrs=EGRESS_FIREWALL["extra_allowed_cidrs"],
+    extra_ips=EGRESS_FIREWALL["extra_allowed_ips"],
+)
+print(
+    f"[SECURITY] egress firewall: "
+    f"{'ENFORCING' if _ef_status['enforcing'] else 'DISABLED (config)'} "
+    f"— off-LAN outbound connections from this process are "
+    f"{'blocked' if _ef_status['enforcing'] else 'NOT blocked'}"
+)
 
 app = FastAPI(title="Sovereign On-Premise Agentic AI Workbench")
 install_error_handlers(app)

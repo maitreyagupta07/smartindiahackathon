@@ -92,3 +92,33 @@ NETWORK_MONITOR = {
     # This machine's own LAN address (the ":8000" the client connects to).
     "expected_lan_server_ip": _NM.get("expected_lan_server_ip") or None,
 }
+
+# In-process egress firewall (app/security/egress_firewall.py) — the
+# ENFORCEMENT counterpart to the read-only monitor above. Installed at app
+# startup; blocks any outbound connection from this process to a publicly
+# routable address. Loopback + RFC1918 + link-local + the LAN peers below
+# are always allowed; anything else here widens the allow-list.
+_EF = _RAW.get("egress_firewall", {}) if isinstance(_RAW.get("egress_firewall"), dict) else {}
+_ef_self_test = []
+for _pair in _EF.get("self_test_targets", []) or []:
+    try:
+        _host, _port = _pair[0], int(_pair[1])
+        if _host:
+            _ef_self_test.append((str(_host), _port))
+    except (TypeError, ValueError, IndexError):
+        continue
+EGRESS_FIREWALL = {
+    "enabled": bool(_EF.get("enabled", True)),
+    # Operator-added always-allowed networks / hosts, on top of the built-in
+    # loopback + private-range policy. Plus the monitor's known LAN peers so
+    # the two layers can never disagree about what "the LAN" is.
+    "extra_allowed_cidrs": [str(c) for c in _EF.get("extra_allowed_cidrs", []) if c],
+    "extra_allowed_ips": (
+        [str(i) for i in _EF.get("extra_allowed_ips", []) if i]
+        + list(NETWORK_MONITOR["expected_client_ips"])
+        + ([NETWORK_MONITOR["expected_lan_server_ip"]] if NETWORK_MONITOR["expected_lan_server_ip"] else [])
+    ),
+    # Public endpoints the /api/egress-firewall/self-test probe tries to
+    # reach (and must fail to reach). host, port pairs.
+    "self_test_targets": _ef_self_test,
+}

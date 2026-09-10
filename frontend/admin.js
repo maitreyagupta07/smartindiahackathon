@@ -431,6 +431,122 @@ function initKnowledgeBase() {
   loadKnowledgeBase();
 }
 
+/* Egress Firewall — Security & Sovereignty tab. The ENFORCEMENT layer:
+   calls GET /api/egress-firewall for live state + the blocked-attempt log,
+   and POST /api/egress-firewall/self-test to actively prove public
+   endpoints are unreachable. Distinct from NetworkMonitor below, which is
+   the read-only witness. */
+const EgressFirewall = {
+  _fmtTs(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  },
+
+  _setStatus(cls, icon, text) {
+    const el = document.getElementById('efw-status');
+    if (!el) return;
+    el.className = `netmon-status ${cls}`;
+    el.innerHTML = `<iconify-icon icon="${icon}"></iconify-icon><span>${escapeHtml(text)}</span>`;
+  },
+
+  render(d) {
+    const setVal = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    const blocked = Number(d.blocked_attempts_total || 0);
+    setVal('efw-blocked-total', blocked.toLocaleString());
+    setVal('efw-allowed-total', Number(d.allowed_connections_total || 0).toLocaleString());
+    setVal('efw-last-blocked', d.last_blocked_at ? this._fmtTs(d.last_blocked_at) : 'never');
+    setVal('efw-last-checked', this._fmtTs(d.last_checked));
+
+    const bt = document.getElementById('efw-blocked-total');
+    if (bt) bt.style.color = blocked > 0 ? 'var(--warning, #b7791f)' : 'var(--success)';
+
+    const list = document.getElementById('efw-allowlist');
+    if (list) {
+      list.innerHTML = (d.allowed_cidrs || [])
+        .map((c) => `<span style="background:var(--border-subtle);padding:2px 7px;border-radius:6px">${escapeHtml(c)}</span>`)
+        .join('');
+    }
+
+    const rows = Array.isArray(d.recent_blocked) ? d.recent_blocked : [];
+    const wrap = document.getElementById('efw-blocked-log-wrap');
+    const tbody = document.getElementById('efw-blocked-log');
+    if (wrap) wrap.hidden = rows.length === 0;
+    if (tbody) {
+      tbody.innerHTML = rows.map((r) => `
+        <tr>
+          <td class="mono">${escapeHtml(this._fmtTs(r.ts))}</td>
+          <td class="mono" style="color:var(--error)">${escapeHtml(String(r.dest_ip))}:${escapeHtml(String(r.dest_port))}</td>
+          <td class="mono">${escapeHtml(String(r.caller || 'unknown'))}</td>
+        </tr>`).join('');
+    }
+
+    if (d.enforcing) {
+      this._setStatus('secure', 'lucide:shield-check',
+        blocked > 0
+          ? `ENFORCING — ${blocked} off-LAN connection${blocked === 1 ? '' : 's'} refused before leaving this machine`
+          : 'ENFORCING — no off-LAN connection has been attempted; the internet is unreachable from this process');
+    } else {
+      this._setStatus('violation', 'lucide:shield-off',
+        'NOT ENFORCING — the egress firewall is disabled in config (egress_firewall.enabled=false)');
+    }
+  },
+
+  renderDemo() {
+    this.render({
+      enforcing: true, blocked_attempts_total: 0, allowed_connections_total: 0,
+      allowed_cidrs: ['127.0.0.0/8', '::1/128', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16'],
+      recent_blocked: [], last_blocked_at: null, last_checked: new Date().toISOString(),
+    });
+    this._setStatus('unknown', 'lucide:help-circle', 'Backend not detected — illustrative demo. Run the app for live enforcement state.');
+  },
+
+  async load() {
+    try { this.render(await Api.getEgressFirewall()); }
+    catch { this.renderDemo(); }
+  },
+
+  async selfTest() {
+    const out = document.getElementById('efw-self-test-result');
+    const btn = document.getElementById('efw-self-test');
+    if (!out) return;
+    out.innerHTML = '<span style="color:var(--text-muted)">Probing public endpoints…</span>';
+    if (btn) btn.disabled = true;
+    try {
+      const d = await Api.runEgressSelfTest();
+      const rows = Array.isArray(d.results) ? d.results : [];
+      const ok = d.verdict === 'ISOLATED';
+      const head = `<div style="font-weight:600;color:${ok ? 'var(--success)' : 'var(--error)'};margin-bottom:6px">
+        <iconify-icon icon="${ok ? 'lucide:shield-check' : 'lucide:shield-alert'}"></iconify-icon>
+        ${escapeHtml(d.verdict)} — ${rows.length} public endpoint${rows.length === 1 ? '' : 's'} tested, ${Number(d.leaked || 0)} leaked</div>`;
+      const body = rows.map((r) => {
+        const blocked = r.outcome === 'BLOCKED';
+        return `<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0">
+          <span class="mono" style="color:${blocked ? 'var(--success)' : 'var(--error)'};font-weight:600;min-width:74px">${escapeHtml(r.outcome)}</span>
+          <span class="mono">${escapeHtml(r.target)}</span>
+          <span style="color:var(--text-muted);font-size:11px">${escapeHtml(r.reason || '')}</span>
+        </div>`;
+      }).join('');
+      out.innerHTML = head + body;
+      this.load();
+    } catch (err) {
+      out.innerHTML = `<span style="color:var(--error)">${escapeHtml(err.message || 'self-test failed')}</span>`;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  },
+
+  init() {
+    const r = document.getElementById('efw-refresh');
+    if (r) r.addEventListener('click', () => this.load());
+    const st = document.getElementById('efw-self-test');
+    if (st) st.addEventListener('click', () => this.selfTest());
+    const sovNav = document.querySelector('.nav-item[data-tab="sovereignty"]');
+    if (sovNav) sovNav.addEventListener('click', () => this.load());
+    this.load();
+  },
+};
+
 /* Network Monitor (Person E) — Security & Sovereignty tab. Calls the app's
    own /api/network-status endpoint (a live psutil sweep of THIS machine's
    established TCP connections, classified LOCAL / LAN_CLIENT / EXTERNAL /
@@ -550,6 +666,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTabs();
   initTableControls();
   initKnowledgeBase();
+  EgressFirewall.init();
   NetworkMonitor.init();
   loadAuditLog();
 });
