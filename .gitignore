@@ -18,3 +18,9 @@ kb_store/
 # Locally-downloaded extra models (SD Turbo, MOMENT-1-small, etc.) — this
 # machine's GPU-capacity downloads, not part of the committed contract/code.
 extra_models/
+
+# Server-side accounts: salted password hashes for whoever is deployed on
+# that box. Per-deployment state, never source — and committing it would
+# publish every operator's hash and freeze the "first account is admin"
+# bootstrap at whatever the developer's machine happened to create.
+app/audit/accounts.sqlite3

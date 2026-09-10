@@ -89,13 +89,38 @@ def forecast_timeseries(data: list, horizon: int = 8) -> dict:
     import torch
 
     model, device = _get_pipeline(horizon)
-    series = _tile_to_context([float(x) for x in data])
+    values = [float(x) for x in data]
+    series = _tile_to_context(values)
 
-    x_enc = torch.tensor(series, dtype=torch.float32).reshape(1, 1, -1).to(device)
-    print(f"[FORECAST] running inference input_len={len(data)} tiled_len={len(series)} horizon={horizon} device={device}")
+    # MOMENT is trained on z-score-normalized windows, so raw real-world
+    # magnitudes have to be standardized before inference and the output
+    # mapped back afterwards. Without this the model was returning values
+    # that ignored the input entirely — verified live: the clean linear ramp
+    # 10,12,...,24 (which should continue ~26,28,30,32,34) came back as
+    # 18.3, 18.7, 16.0, 16.5, 15.8 — decreasing, and clustered around the
+    # input's own mean rather than following its trend. Standardizing on the
+    # ORIGINAL series (not the tiled copy) keeps mean/std the statistics of
+    # the data the user actually supplied.
+    mean = sum(values) / len(values)
+    var = sum((v - mean) ** 2 for v in values) / len(values)
+    std = var ** 0.5
+    # A perfectly flat series has std 0 — dividing by it would produce
+    # NaN/inf and poison the whole forecast. Fall back to 1.0, which makes
+    # normalization a pure mean-shift and still round-trips exactly.
+    if std < 1e-8:
+        std = 1.0
+    normalized = [(v - mean) / std for v in series]
+
+    x_enc = torch.tensor(normalized, dtype=torch.float32).reshape(1, 1, -1).to(device)
+    print(
+        f"[FORECAST] running inference input_len={len(data)} tiled_len={len(series)} "
+        f"horizon={horizon} device={device} mean={mean:.4f} std={std:.4f}"
+    )
     with torch.no_grad():
         output = model(x_enc=x_enc)
-    forecast = output.forecast.reshape(-1).cpu().tolist()
+    raw = output.forecast.reshape(-1).cpu().tolist()
+    # Invert the normalization so the forecast comes back in the user's own units.
+    forecast = [v * std + mean for v in raw]
 
     return {"input_length": len(data), "horizon": horizon, "forecast": [round(v, 4) for v in forecast]}
 

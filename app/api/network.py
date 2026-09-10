@@ -20,8 +20,9 @@ policy_violations, last_checked (and task_id for the task-specific one).
                                        every one is refused. This is the
                                        on-screen isolation proof.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .auth import current_admin
 from ..monitor import network
 from ..security import egress_firewall
 from ..storage.config import EGRESS_FIREWALL
@@ -30,7 +31,7 @@ router = APIRouter()
 
 
 @router.get("/api/network-status")
-async def network_status():
+async def network_status(_admin: str = Depends(current_admin)):
     """Live application-level check. Independent OS-level tools (Wireshark /
     Resource Monitor) remain the packet-level proof — this is the app's own
     self-report, and it does not attribute individual packets to task IDs."""
@@ -38,7 +39,7 @@ async def network_status():
 
 
 @router.get("/api/network-status/{task_id}")
-async def task_network_status(task_id: str):
+async def task_network_status(task_id: str, _admin: str = Depends(current_admin)):
     record = await network.get_task_record(task_id)
     if record is None:
         raise HTTPException(

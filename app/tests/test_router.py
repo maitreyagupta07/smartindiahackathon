@@ -48,3 +48,35 @@ def test_model_registry_vision():
 
 def test_model_registry_text():
     assert get_model_for_task_type("text-generation") == TEXT_MODEL
+
+
+def test_smalltalk_in_chat_skips_knowledge_base():
+    """A greeting inside an active chat must NOT become a KB question.
+
+    Observed live before this: "hi" sent right after a document-generation
+    turn came back re-emitting that document, because any low-signal message
+    in a chat was upgraded to task_type="chat", which searches the KB using
+    the message itself as the query and then asks the model to answer FROM
+    the Knowledge Base with the previous turns in context.
+    """
+    import asyncio
+    from app.router.router import route_task
+
+    for greeting in ("hi", "Hello!", "thanks", "ok", "good morning"):
+        task_type, _model, _reason = asyncio.run(route_task(greeting, None, chat_id="c1"))
+        assert task_type == "text-generation", f"{greeting!r} -> {task_type}"
+
+
+def test_real_questions_in_chat_still_use_knowledge_base():
+    """The small-talk bypass must not swallow genuine questions — including
+    ones that merely START with a greeting word."""
+    import asyncio
+    from app.router.router import route_task
+
+    for question in (
+        "thanks, now summarise the inspection report",
+        "hi, what does the SOP say about lockout-tagout?",
+        "what is the bearing clearance?",
+    ):
+        task_type, _model, _reason = asyncio.run(route_task(question, None, chat_id="c1"))
+        assert task_type != "text-generation" or "summar" in question, f"{question!r} -> {task_type}"

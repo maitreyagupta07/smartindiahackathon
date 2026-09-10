@@ -19,10 +19,11 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from .auth import current_user
 from ..audit.log import write_audit_entry
 from ..storage.config import FILES_DIR, KB_STORE_DIR
 from ..tools.doc_preview import render_preview
@@ -39,7 +40,9 @@ _KB_EXTS = (".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".txt", ".md")
 
 
 class KbUploadRequest(BaseModel):
-    user_id: str
+    # NOTE: no user_id here on purpose. Identity comes from the bearer token
+    # (see .auth.current_user); accepting it from the body is exactly the
+    # gap that let any caller act as any operator.
     file_base64: str
     file_name: str
     file_mime_type: Optional[str] = None
@@ -69,8 +72,8 @@ def _stored_file(user_id: str, document_id: str) -> Path:
 
 
 @router.post("/api/kb/upload")
-async def kb_upload(req: KbUploadRequest):
-    user_id = _safe_segment(req.user_id, "user_id")
+async def kb_upload(req: KbUploadRequest, user_id: str = Depends(current_user)):
+    user_id = _safe_segment(user_id, "user_id")
     filename = Path((req.file_name or "").strip()).name
     if not filename:
         raise HTTPException(status_code=400, detail="file_name is required")
@@ -131,13 +134,13 @@ async def kb_upload(req: KbUploadRequest):
 
 
 @router.get("/api/kb/list")
-async def kb_list(user_id: str = Query(...)):
+async def kb_list(user_id: str = Depends(current_user)):
     user_id = _safe_segment(user_id, "user_id")
     return {"documents": await list_global_kb_documents(user_id)}
 
 
 @router.delete("/api/kb/{document_id}")
-async def kb_delete(document_id: str, user_id: str = Query(...)):
+async def kb_delete(document_id: str, user_id: str = Depends(current_user)):
     user_id = _safe_segment(user_id, "user_id")
     document_id = _safe_segment(document_id, "document_id")
     removed = await delete_global_kb_document(user_id, document_id)
@@ -159,7 +162,7 @@ async def kb_delete(document_id: str, user_id: str = Query(...)):
 
 
 @router.get("/api/kb/{document_id}/raw")
-async def kb_raw(document_id: str, user_id: str = Query(...)):
+async def kb_raw(document_id: str, user_id: str = Depends(current_user)):
     path = _stored_file(user_id, document_id)
     # inline so the preview panel's <iframe> can render a PDF directly; the
     # panel's Download button carries its own `download` attribute.
@@ -167,7 +170,7 @@ async def kb_raw(document_id: str, user_id: str = Query(...)):
 
 
 @router.get("/api/kb/{document_id}/preview")
-async def kb_preview(document_id: str, user_id: str = Query(...)):
+async def kb_preview(document_id: str, user_id: str = Depends(current_user)):
     user_id = _safe_segment(user_id, "user_id")
     document_id = _safe_segment(document_id, "document_id")
     path = _stored_file(user_id, document_id)
@@ -175,7 +178,7 @@ async def kb_preview(document_id: str, user_id: str = Query(...)):
     rendered.update({
         "filename": path.name,
         "file_type": path.suffix.lower().lstrip(".") or "txt",
-        "raw_url": f"/api/kb/{document_id}/raw?user_id={user_id}",
+        "raw_url": f"/api/kb/{document_id}/raw",
     })
     return rendered
 

@@ -516,6 +516,39 @@ def looks_like_transcript(text: str) -> bool:
     return len(_SPEAKER_LINE_RE.findall(t)) >= 4
 
 
+# Conversational filler — greetings, thanks, acknowledgements. These carry no
+# question at all, so routing them down the chat/Knowledge-Base path (which is
+# what any low-signal message in an active chat otherwise gets — see
+# router.py) actively breaks them: the KB is searched using "hi" as the query,
+# the prompt then instructs the model to answer FROM the Knowledge Base and to
+# say so plainly when the passages don't cover it, and the recent-conversation
+# block is right there for it to latch onto. Observed live: "hi" sent straight
+# after a document-generation turn made the model re-emit that document's
+# content instead of saying hello, and unrelated questions came back as "that
+# isn't in the knowledge base". Matching is whole-message only (an exact match
+# after stripping punctuation) so a real question that merely STARTS with
+# "hi," or contains "thanks" — "thanks, now compare these two reports" — is
+# never misread as filler.
+_SMALLTALK_PHRASES = frozenset({
+    "hi", "hii", "hey", "hello", "yo", "sup", "hiya", "howdy",
+    "good morning", "good afternoon", "good evening", "good night",
+    "thanks", "thank you", "thanks!", "ty", "thx", "cheers",
+    "ok", "okay", "k", "cool", "nice", "great", "awesome", "perfect",
+    "got it", "understood", "sounds good", "makes sense",
+    "bye", "goodbye", "see ya", "see you", "later",
+    "how are you", "how are you?", "whats up", "what's up",
+    "who are you", "who are you?", "what can you do", "what can you do?",
+})
+
+
+def is_smalltalk(prompt: str) -> bool:
+    """True only when the WHOLE message is conversational filler."""
+    cleaned = (prompt or "").strip().lower().strip(".!?,；;… ")
+    if not cleaned or len(cleaned) > 24:
+        return False
+    return cleaned in _SMALLTALK_PHRASES
+
+
 def needs_reasoning(prompt: str, file_mime_type: str | None) -> bool:
     """
     True only for image tasks where the prompt implies analysis beyond a

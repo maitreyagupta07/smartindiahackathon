@@ -9,6 +9,7 @@ from .classifier import (
     needs_reasoning,
     looks_like_comparison,
     looks_like_transcript,
+    is_smalltalk,
 )
 from .model_registry import get_model_for_task_type, TEXT_MODEL
 
@@ -42,6 +43,20 @@ async def route_task(
     result = classify(prompt, file_mime_type)
 
     in_chat = bool(chat_id and chat_id.strip())
+
+    # Pure conversational filler ("hi", "thanks", "ok") never goes down the
+    # chat/Knowledge-Base path, even inside an active chat. That path
+    # searches the KB using the greeting itself as the query and then asks
+    # the model to answer FROM the KB — which is why a greeting sent after a
+    # document-generation turn came back re-emitting that document, and why
+    # unrelated messages came back as "that isn't in the knowledge base".
+    # Plain text-generation answers a greeting as a greeting.
+    if in_chat and is_smalltalk(prompt):
+        print(
+            f"[ROUTER] chat_id={chat_id!r} -> task_type=text-generation first_model={TEXT_MODEL} "
+            f"(conversational filler — skipping KB retrieval)"
+        )
+        return "text-generation", TEXT_MODEL, False
 
     if in_chat and result.task_type == "text-generation":
         print(

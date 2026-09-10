@@ -2123,8 +2123,16 @@ const PreviewPanel = {
     if (!LIVE_BACKEND) { this._error('Backend not detected — preview is unavailable.'); return; }
     this._loading();
     try {
-      const payload = await Api.kbPreview(Store.USER_ID, doc.document_id);
+      const payload = await Api.kbPreview(doc.document_id);
       if (this.currentKey !== key) return; // switched away while loading
+      // /api/kb/<id>/raw is token-protected, and an <iframe>/download link
+      // can't send the header — swap in an authenticated blob: URL so the
+      // PDF frame and the Open/Download buttons keep working.
+      if (payload && payload.raw_url) {
+        try { payload.raw_url = await Api.kbRawBlobUrl(doc.document_id); }
+        catch { payload.raw_url = null; }
+        if (this.currentKey !== key) return;
+      }
       this._renderPayload(payload);
     } catch (err) {
       if (this.currentKey === key) this._error(err.message);
@@ -2214,7 +2222,7 @@ const KnowledgeBase = {
   async refresh() {
     if (!LIVE_BACKEND) { this.render(); return; }
     try {
-      const data = await Api.kbList(Store.USER_ID);
+      const data = await Api.kbList();
       this.docs = data.documents || [];
     } catch (err) {
       toast(`Couldn't load the Knowledge Base: ${err.message}`, true);
@@ -2281,7 +2289,7 @@ const KnowledgeBase = {
     try {
       const file_base64 = await fileToBase64(file);
       const res = await Api.kbUpload({
-        user_id: Store.USER_ID, file_base64, file_name: name, file_mime_type: file.type || null,
+        file_base64, file_name: name, file_mime_type: file.type || null,
       });
       this.docs = this.docs.filter((d) => d.document_id !== tempId);
       await this.refresh();
@@ -2301,7 +2309,7 @@ const KnowledgeBase = {
     this.render();
     if (PreviewPanel.currentKey === 'kb:' + documentId) PreviewPanel.close();
     try {
-      await Api.kbDelete(Store.USER_ID, documentId);
+      await Api.kbDelete(documentId);
       toast(`${doc.filename} removed from the Knowledge Base.`);
     } catch (err) {
       toast(`Couldn't remove ${doc.filename}: ${err.message}`, true);

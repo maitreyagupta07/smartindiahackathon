@@ -48,6 +48,23 @@ const API_BASE = window.SOVEREIGN_API_BASE ?? (() => {
     : location.hostname;
   return `http://${host}:8000`;
 })();
+/** Bearer token for the server-side session (see app/api/auth.py).
+ *  Identity is now proven to the server by this token, not by a user_id
+ *  string in the request — that string was previously accepted as-is, so
+ *  anyone could read or delete another operator's Knowledge Base. */
+const AuthToken = {
+  KEY: 'sovereign-auth-token',
+  get() { try { return localStorage.getItem(this.KEY) || null; } catch { return null; } },
+  set(t) { try { localStorage.setItem(this.KEY, t); } catch { /* noop */ } },
+  clear() { try { localStorage.removeItem(this.KEY); } catch { /* noop */ } },
+};
+
+/** Request headers carrying the session token when we have one. */
+function authHeaders(extra = {}) {
+  const t = AuthToken.get();
+  return t ? { ...extra, Authorization: `Bearer ${t}` } : { ...extra };
+}
+
 const Api = {
   async submitTask({ user_id, prompt, file_base64 = null, file_name = null, file_mime_type = null }) {
     const res = await fetch(`${API_BASE}/api/submit-task`, {
@@ -72,7 +89,7 @@ const Api = {
   },
 
   async getAuditLog() {
-    const res = await fetch(`${API_BASE}/api/audit-log`);
+    const res = await fetch(`${API_BASE}/api/audit-log`, { headers: authHeaders() });
     if (!res.ok) {
       const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       throw new Error(body.error || `audit-log failed (${res.status})`);
@@ -123,29 +140,29 @@ const Api = {
   /* ---- Persistent per-operator global Knowledge Base (sidebar manager) ---- */
 
   /** Every document in this operator's global KB. In scope for every chat. */
-  async kbList(userId) {
-    const res = await fetch(`${API_BASE}/api/kb/list?user_id=${encodeURIComponent(userId)}`);
+  async kbList() {
+    const res = await fetch(`${API_BASE}/api/kb/list`, { headers: authHeaders() });
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `kb list failed (${res.status})`);
     return body; // { documents: [...] }
   },
 
   /** Add a file to the global KB. Stays in scope for every chat until removed. */
-  async kbUpload({ user_id, file_base64, file_name, file_mime_type = null }) {
+  async kbUpload({ file_base64, file_name, file_mime_type = null }) {
     const res = await fetch(`${API_BASE}/api/kb/upload`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id, file_base64, file_name, file_mime_type }),
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ file_base64, file_name, file_mime_type }),
     });
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `kb upload failed (${res.status})`);
     return body;
   },
 
-  async kbDelete(userId, documentId) {
+  async kbDelete(documentId) {
     const res = await fetch(
-      `${API_BASE}/api/kb/${encodeURIComponent(documentId)}?user_id=${encodeURIComponent(userId)}`,
-      { method: 'DELETE' },
+      `${API_BASE}/api/kb/${encodeURIComponent(documentId)}`,
+      { method: 'DELETE', headers: authHeaders() },
     );
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `kb delete failed (${res.status})`);
@@ -153,17 +170,27 @@ const Api = {
   },
 
   /** Server-rendered inline preview payload for one KB document. */
-  async kbPreview(userId, documentId) {
+  async kbPreview(documentId) {
     const res = await fetch(
-      `${API_BASE}/api/kb/${encodeURIComponent(documentId)}/preview?user_id=${encodeURIComponent(userId)}`,
+      `${API_BASE}/api/kb/${encodeURIComponent(documentId)}/preview`,
+      { headers: authHeaders() },
     );
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `kb preview failed (${res.status})`);
     return body;
   },
 
-  kbRawUrl(userId, documentId) {
-    return `${API_BASE}/api/kb/${encodeURIComponent(documentId)}/raw?user_id=${encodeURIComponent(userId)}`;
+  /** The raw KB file as a blob: URL.
+   *  /api/kb/<id>/raw needs the bearer token, and a browser cannot attach a
+   *  header to an <iframe src> or a download link — so fetch the bytes with
+   *  auth and hand back an object URL instead. Putting the token in the
+   *  query string would work too, but would leak it into history and logs. */
+  async kbRawBlobUrl(documentId) {
+    const res = await fetch(`${API_BASE}/api/kb/${encodeURIComponent(documentId)}/raw`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) throw new Error(`could not load file (${res.status})`);
+    return URL.createObjectURL(await res.blob());
   },
 
   /** Server-rendered inline preview payload for a generated deliverable in /files/. */
@@ -248,28 +275,72 @@ const UserAuth = {
     catch { return {}; }
   },
   _save(accounts) { localStorage.setItem(this.ACCOUNTS_KEY, JSON.stringify(accounts)); },
-  accountExists(userId) { return Object.prototype.hasOwnProperty.call(this._accounts(), userId); },
-  createAccount(userId, password, nickname) {
+
+  /* Credentials are verified SERVER-side now (app/api/auth.py): passwords
+     are PBKDF2-hashed in SQLite and a bearer token proves identity on every
+     API call. The old browser-local password check that lived here was a UI
+     gate only — the APIs behind it accepted any user_id anyone cared to
+     send. What stays local is presentation state (the nickname used for the
+     greeting) and the per-tab session marker. */
+
+  /** POST /api/auth/signup — creates the account and starts a session. */
+  async signup(userId, password, nickname) {
+    const res = await fetch(`${API_BASE}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, password, nickname }),
+    });
+    const body = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.detail || body.error || `signup failed (${res.status})`);
+    this._acceptSession(body);
+    return body;
+  },
+
+  /** POST /api/auth/login — verifies the password and starts a session. */
+  async login(userId, password) {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, password }),
+    });
+    const body = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.detail || body.error || `sign in failed (${res.status})`);
+    this._acceptSession(body);
+    return body;
+  },
+
+  _acceptSession(body) {
+    AuthToken.set(body.token);
     const accounts = this._accounts();
-    accounts[userId] = { password, nickname: (nickname || '').trim() || userId };
+    accounts[body.user_id] = { nickname: body.nickname || body.user_id, is_admin: !!body.is_admin };
     this._save(accounts);
+    this.startSession(body.user_id);
   },
-  checkLogin(userId, password) {
-    const acc = this._accounts()[userId];
-    return !!acc && acc.password === password;
-  },
+
   nicknameFor(userId) {
     const acc = this._accounts()[userId];
     return (acc && acc.nickname) || userId;
   },
+  isAdmin(userId) {
+    const acc = this._accounts()[userId || this.currentUserId()];
+    return !!(acc && acc.is_admin);
+  },
   startSession(userId) { sessionStorage.setItem(this.SESSION_KEY, userId); },
-  endSession() { sessionStorage.removeItem(this.SESSION_KEY); },
+  endSession() {
+    const t = AuthToken.get();
+    if (t) {
+      // Best-effort server-side revoke; the local clear happens regardless.
+      fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+    }
+    AuthToken.clear();
+    sessionStorage.removeItem(this.SESSION_KEY);
+  },
   isSessionActive() { return !!sessionStorage.getItem(this.SESSION_KEY); },
   currentUserId() { return sessionStorage.getItem(this.SESSION_KEY); },
   /** Call at the very top of any user-workbench page. Redirects to the
    *  login screen immediately if there is no active session for this tab. */
   guard() {
-    if (!this.isSessionActive()) {
+    if (!this.isSessionActive() || !AuthToken.get()) {
       const next = encodeURIComponent(location.pathname.split('/').pop() + location.hash);
       location.replace(`login.html?next=${next}`);
     }
@@ -452,11 +523,19 @@ const AdminAuth = {
   ensureDefaultPasscode() { if (!this.hasPasscode()) this.setPasscode(this.DEFAULT_PASSCODE); },
   isSessionActive() { return sessionStorage.getItem(this.SESSION_KEY) === 'true'; },
   startSession() { sessionStorage.setItem(this.SESSION_KEY, 'true'); },
-  endSession() { sessionStorage.removeItem(this.SESSION_KEY); },
+  endSession() {
+    const t = AuthToken.get();
+    if (t) {
+      // Best-effort server-side revoke; the local clear happens regardless.
+      fetch(`${API_BASE}/api/auth/logout`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+    }
+    AuthToken.clear();
+    sessionStorage.removeItem(this.SESSION_KEY);
+  },
   /** Call at the very top of any admin-shell page. Redirects to the login
    *  screen immediately if there is no active session for this tab. */
   guard() {
-    if (!this.isSessionActive()) {
+    if (!this.isSessionActive() || !AuthToken.get()) {
       const next = encodeURIComponent(location.pathname.split('/').pop() + location.hash);
       location.replace(`admin-login.html?next=${next}`);
     }

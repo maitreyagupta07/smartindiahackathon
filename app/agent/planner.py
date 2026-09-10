@@ -1100,15 +1100,57 @@ def _build_chat_prompt(question: str, history: Optional[list], tool_observation:
     else:
         task_block = ""
 
+    # Two different jobs, so two different system lines. With retrieved
+    # passages the model should stay grounded in them and admit the gaps.
+    # With NO passages, the old single prompt still ordered it to answer
+    # "using the user's uploaded Knowledge Base" and to say so plainly when
+    # the passages fell short — so an ordinary question in a chat that
+    # happened to retrieve nothing came back as "that isn't in the knowledge
+    # base" instead of just being answered. When nothing was retrieved the
+    # Knowledge Base is simply not part of this question: don't mention it.
+    if results:
+        # Retrieval always returns its top-k, so passages show up even for a
+        # question that has nothing to do with the user's documents — and
+        # the similarity scores barely separate the two cases (measured on
+        # this corpus: 0.37 for a genuinely on-topic query vs 0.34 for a
+        # completely unrelated one), so a score cutoff would be arbitrary
+        # and would drop real hits. The prompt therefore has to tolerate
+        # irrelevant passages gracefully instead: answer the question that
+        # was actually asked, use the passages only if they genuinely bear
+        # on it, and don't narrate the Knowledge Base's contents. Without
+        # that last clause an ordinary question opened with "the knowledge
+        # base contains no information on this" before answering.
+        system_line = (
+            "You are an assistant helping the user in an ongoing chat. Some "
+            "passages from their uploaded documents are included below; they "
+            "were retrieved automatically and may or may not be relevant. "
+            "Answer the CURRENT QUESTION directly. If the passages genuinely "
+            "help, use them and cite the source; if they are not relevant, "
+            "simply answer from your own general knowledge WITHOUT commenting "
+            "on what the documents do or do not contain. Only discuss the "
+            "Knowledge Base itself if the user actually asked about their "
+            "documents. Use the recent conversation only to resolve "
+            "references such as \"it\", \"they\", \"this\", or \"that\" — do "
+            "not continue or repeat an earlier task unless asked to."
+        )
+        kb_section = f"POSSIBLY RELEVANT PASSAGES:\n{kb_block}\n\n"
+    else:
+        system_line = (
+            "You are a helpful assistant continuing a conversation with the "
+            "user. Use the recent conversation only to resolve references such "
+            "as \"it\", \"they\", \"this\", or \"that\" — otherwise answer the "
+            "CURRENT QUESTION on its own terms, from your own general "
+            "knowledge. The user's uploaded documents contain nothing relevant "
+            "to this question, so do NOT mention a knowledge base, do not say "
+            "anything is missing from it, and do not continue or repeat a "
+            "previous task unless the question actually asks you to."
+        )
+        kb_section = ""
+
     return (
-        "You are an assistant answering questions using the user's uploaded "
-        "Knowledge Base and the conversation so far in this chat. Use the "
-        "recent conversation to resolve references such as \"it\", \"they\", "
-        "\"this\", or \"that\". Prefer the Knowledge Base passages for facts; "
-        "if they do not contain the answer, say so plainly instead of "
-        "guessing."
+        f"{system_line}"
         f"{task_block}\n\n"
-        f"RELEVANT KNOWLEDGE BASE:\n{kb_block}\n\n"
+        f"{kb_section}"
         f"RECENT CONVERSATION:\n{convo}\n\n"
         f"CURRENT QUESTION:\n{question}"
     )

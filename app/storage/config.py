@@ -122,3 +122,13 @@ EGRESS_FIREWALL = {
     # reach (and must fail to reach). host, port pairs.
     "self_test_targets": _ef_self_test,
 }
+
+# Operators who hold the Admin role (the audit log and network-status
+# endpoints). Listed here rather than hardcoded so who counts as staff is a
+# deployment decision, editable without touching code — and so an install
+# whose first account was a demo/test user can still designate an admin.
+# The first account on a fresh database is also made admin automatically
+# (see app/api/auth.py), which covers a clean deployment with no config.
+ADMIN_USER_IDS = frozenset(
+    str(u).strip() for u in (_RAW.get("admin_user_ids") or []) if str(u).strip()
+)

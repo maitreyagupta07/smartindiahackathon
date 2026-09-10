@@ -7,10 +7,11 @@ import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from .auth import current_admin
 from .dispatch import TASKS, TASK_LOCK, dispatch_to_agent
 from ..audit.log import read_audit_entries
 
@@ -87,5 +88,9 @@ async def task_status(task_id: str):
 
 
 @router.get("/api/audit-log")
-async def audit_log():
+async def audit_log(_admin: str = Depends(current_admin)):
+    """Admin-only. This is the whole activity record for every operator —
+    user ids, client IPs, timestamps, token counts. It was previously served
+    to any unauthenticated caller on the LAN while only the Admin *UI* was
+    passcode-gated, so the data behind that gate was open."""
     return {"entries": read_audit_entries()}

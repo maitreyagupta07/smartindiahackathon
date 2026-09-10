@@ -50,8 +50,9 @@
 
     <div class="auth-switch">Already have an account? <a href="login.html">Sign in</a></div>
     <div class="auth-note">
-      A browser-local account on this device — there is no server-side login yet.
-      Your User ID becomes your identity across chats and your Knowledge Base.
+      Your account lives on the Workbench server; your password is stored only
+      as a salted hash. Your User ID is your identity across chats and your
+      Knowledge Base.
     </div>
   </div>
 </div>
@@ -81,7 +82,7 @@
     errorEl.classList.add('show');
   }
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.classList.remove('show');
     const userId = userIdInput.value.trim();
@@ -94,14 +95,22 @@
       showError('User ID should be 2-32 characters: letters, numbers, ".", "_" or "-" only.');
       return;
     }
-    if (UserAuth.accountExists(userId)) { showError('That User ID is already taken — sign in instead?'); return; }
     if (password.length < 4) { showError('Choose a password with at least 4 characters.'); return; }
     if (password !== confirm) { showError('Passwords do not match.'); return; }
 
-    UserAuth.createAccount(userId, password, nickname);
-    UserAuth.startSession(userId);
-    const params = new URLSearchParams(location.search);
-    location.href = params.get('next') || 'index.html';
+    const btn = document.getElementById('signup-submit');
+    btn.disabled = true;
+    try {
+      // Created server-side; "already taken" is decided by the server, which
+      // is the only place that actually knows every account.
+      await UserAuth.signup(userId, password, nickname);
+      const params = new URLSearchParams(location.search);
+      location.href = params.get('next') || 'index.html';
+    } catch (err) {
+      showError(err.message || 'Could not create the account.');
+    } finally {
+      btn.disabled = false;
+    }
   });
 </script>
 </body>

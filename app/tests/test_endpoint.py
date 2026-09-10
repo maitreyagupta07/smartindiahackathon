@@ -54,3 +54,27 @@ async def test_submit_and_status_shape():
         assert key in status_data
     assert status_data["status"] in ("completed", "failed")
     assert status_data["result"]["type"] in ("text", "file", None)
+
+
+def test_admin_endpoints_require_admin_auth():
+    """The audit log and network status are the Admin panel's data. The
+    panel itself was passcode-gated in the browser, but these endpoints
+    answered any unauthenticated caller on the LAN — the full activity
+    record (user ids, client IPs, timestamps) was effectively public."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    c = TestClient(app)
+    for path in ("/api/audit-log", "/api/network-status"):
+        assert c.get(path).status_code == 401, path
+
+    # A signed-in NON-admin still cannot read them.
+    import uuid
+    uid = f"nonadmin-{uuid.uuid4().hex[:10]}"
+    # First account on a fresh DB is admin, so make sure one exists first.
+    c.post("/api/auth/signup", json={"user_id": f"seed-{uuid.uuid4().hex[:8]}", "password": "pw-test-1234"})
+    r = c.post("/api/auth/signup", json={"user_id": uid, "password": "pw-test-1234"})
+    assert r.status_code == 200, r.text
+    hdrs = {"Authorization": f"Bearer {r.json()['token']}"}
+    for path in ("/api/audit-log", "/api/network-status"):
+        assert c.get(path, headers=hdrs).status_code == 403, path

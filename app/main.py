@@ -38,6 +38,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .api.auth import router as auth_router, init_accounts_db
 from .api.errors import install_error_handlers
 from .api.tasks import router as tasks_router
 from .api.chat import router as chat_router
@@ -84,12 +85,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(tasks_router)
 app.include_router(chat_router)
 app.include_router(knowledge_router)
 app.include_router(network_router)
 
 init_db()
+init_accounts_db()
 
 
 @app.middleware("http")

@@ -89,7 +89,18 @@ async def test_chat_flow_no_matching_docs_is_honest():
     assert resp.status == "completed"
     assert resp.result.sources is None
     sent_prompt = mocked_infer.call_args.kwargs.get("prompt") or mocked_infer.call_args.args[1]
-    assert "no relevant passages" in sent_prompt.lower()
+    lowered = sent_prompt.lower()
+    # When retrieval comes back empty the Knowledge Base is simply not part
+    # of this question, so the prompt must not frame it as one: no KB
+    # section, and an explicit instruction not to claim something is missing
+    # from it. The previous wording ("answer using the uploaded Knowledge
+    # Base ... say so plainly when the passages don't cover it") is what made
+    # ordinary questions come back as "that isn't in the knowledge base".
+    assert "possibly relevant passages:" not in lowered
+    assert "do not mention a knowledge base" in lowered
+    # Still honest about having no retrieved facts — it must not be told to
+    # invent them, and the real question still has to reach the model.
+    assert "current question:\nanything about turbines?" in lowered
 
 
 @pytest.mark.asyncio

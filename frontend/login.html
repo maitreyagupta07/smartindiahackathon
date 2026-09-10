@@ -35,8 +35,9 @@
 
     <div class="auth-switch">New here? <a href="signup.html">Create an account</a></div>
     <div class="auth-note">
-      A browser-local account on this device — there is no server-side login yet.
-      Your User ID becomes your identity across chats and your Knowledge Base.
+      Your account lives on the Workbench server; your password is stored only
+      as a salted hash. Your User ID is your identity across chats and your
+      Knowledge Base.
     </div>
   </div>
 </div>
@@ -64,18 +65,26 @@
     errorEl.classList.add('show');
   }
 
-  form.addEventListener('submit', (e) => {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorEl.classList.remove('show');
     const userId = userIdInput.value.trim();
     const password = passwordInput.value;
     if (!userId || !password) { showError('Enter your User ID and password.'); return; }
-    if (!UserAuth.accountExists(userId)) { showError('No account with that User ID yet — create one below.'); return; }
-    if (!UserAuth.checkLogin(userId, password)) { showError('Incorrect password.'); return; }
 
-    UserAuth.startSession(userId);
-    const params = new URLSearchParams(location.search);
-    location.href = params.get('next') || 'index.html';
+    const btn = document.getElementById('login-submit');
+    btn.disabled = true;
+    try {
+      // Verified server-side (app/api/auth.py) against a PBKDF2 hash, and
+      // returns the bearer token every later API call is authenticated with.
+      await UserAuth.login(userId, password);
+      const params = new URLSearchParams(location.search);
+      location.href = params.get('next') || 'index.html';
+    } catch (err) {
+      showError(err.message || 'Sign in failed.');
+    } finally {
+      btn.disabled = false;
+    }
   });
 </script>
 </body>

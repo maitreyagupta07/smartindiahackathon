@@ -32,6 +32,19 @@ def _uid() -> str:
     return f"kbtest-{uuid.uuid4().hex[:12]}"
 
 
+def _auth(user_id: str | None = None) -> tuple[str, dict]:
+    """Create a real server-side account and return (user_id, auth headers).
+
+    The /api/kb/* endpoints take identity from the bearer token now, never
+    from a caller-supplied user_id — so every KB test has to authenticate
+    exactly the way the browser does.
+    """
+    user_id = user_id or _uid()
+    r = client.post("/api/auth/signup", json={"user_id": user_id, "password": "pw-test-1234"})
+    assert r.status_code == 200, r.text
+    return user_id, {"Authorization": f"Bearer {r.json()['token']}"}
+
+
 def _txt_b64(text: str) -> str:
     return base64.b64encode(text.encode("utf-8")).decode("ascii")
 
@@ -168,9 +181,8 @@ def test_preview_unsupported_type():
 # --------------------------------------------------------------------------
 
 def test_kb_endpoints_full_lifecycle():
-    user_id = _uid()
-    up = client.post("/api/kb/upload", json={
-        "user_id": user_id,
+    user_id, hdrs = _auth()
+    up = client.post("/api/kb/upload", headers=hdrs, json={
         "file_name": "handbook.txt",
         "file_base64": _txt_b64("Section 4: lockout-tagout must be verified by a second person."),
         "file_mime_type": "text/plain",
@@ -179,47 +191,93 @@ def test_kb_endpoints_full_lifecycle():
     doc_id = up.json()["document_id"]
     assert up.json()["chunks"] >= 1
 
-    listing = client.get("/api/kb/list", params={"user_id": user_id})
+    listing = client.get("/api/kb/list", headers=hdrs)
     assert listing.status_code == 200
     docs = listing.json()["documents"]
     assert len(docs) == 1 and docs[0]["filename"] == "handbook.txt"
 
-    prev = client.get(f"/api/kb/{doc_id}/preview", params={"user_id": user_id})
+    prev = client.get(f"/api/kb/{doc_id}/preview", headers=hdrs)
     assert prev.status_code == 200
     body = prev.json()
     assert body["mode"] == "text"
     assert "lockout-tagout" in body["text"]
     assert body["raw_url"].startswith(f"/api/kb/{doc_id}/raw")
 
-    raw = client.get(f"/api/kb/{doc_id}/raw", params={"user_id": user_id})
+    raw = client.get(f"/api/kb/{doc_id}/raw", headers=hdrs)
     assert raw.status_code == 200
     assert b"lockout-tagout" in raw.content
 
-    delr = client.request("DELETE", f"/api/kb/{doc_id}", params={"user_id": user_id})
+    delr = client.request("DELETE", f"/api/kb/{doc_id}", headers=hdrs)
     assert delr.status_code == 200 and delr.json()["success"] is True
-    assert client.get("/api/kb/list", params={"user_id": user_id}).json()["documents"] == []
+    assert client.get("/api/kb/list", headers=hdrs).json()["documents"] == []
 
 
 def test_kb_upload_rejects_unsupported_and_images():
-    user_id = _uid()
-    bad = client.post("/api/kb/upload", json={
-        "user_id": user_id, "file_name": "photo.png",
+    _, hdrs = _auth()
+    bad = client.post("/api/kb/upload", headers=hdrs, json={
+        "file_name": "photo.png",
         "file_base64": _txt_b64("x"), "file_mime_type": "image/png",
     })
     assert bad.status_code == 400
 
-    bad2 = client.post("/api/kb/upload", json={
-        "user_id": user_id, "file_name": "app.exe", "file_base64": _txt_b64("x"),
+    bad2 = client.post("/api/kb/upload", headers=hdrs, json={
+        "file_name": "app.exe", "file_base64": _txt_b64("x"),
     })
     assert bad2.status_code == 400
 
 
 def test_kb_path_traversal_is_rejected():
-    for evil in ("../etc", "a/b", ".."):
-        r = client.get("/api/kb/list", params={"user_id": evil})
-        assert r.status_code == 400
-    r = client.get("/api/kb/%2e%2e/preview", params={"user_id": _uid()})
+    """user_id can no longer be supplied by the caller at all (it comes from
+    the token), which removes that traversal vector structurally. The
+    document_id segment is still caller-controlled, so it stays guarded."""
+    _, hdrs = _auth()
+    r = client.get("/api/kb/%2e%2e/preview", headers=hdrs)
     assert r.status_code in (400, 404)
+    r = client.get("/api/kb/%2e%2e/raw", headers=hdrs)
+    assert r.status_code in (400, 404)
+
+
+def test_kb_requires_authentication():
+    """Every /api/kb/* route rejects an unauthenticated caller. Before the
+    server-side session existed these all answered anyone on the LAN."""
+    for method, path in [
+        ("GET", "/api/kb/list"),
+        ("GET", "/api/kb/some-doc/preview"),
+        ("GET", "/api/kb/some-doc/raw"),
+        ("DELETE", "/api/kb/some-doc"),
+    ]:
+        r = client.request(method, path)
+        assert r.status_code == 401, f"{method} {path} -> {r.status_code}"
+    r = client.post("/api/kb/upload", json={"file_name": "a.txt", "file_base64": _txt_b64("x")})
+    assert r.status_code == 401
+
+
+def test_kb_is_isolated_between_authenticated_users():
+    """The actual vulnerability this replaced: user_id was a string the
+    caller chose, so anyone could list, read, or delete another operator's
+    documents just by naming them. Identity now comes from the token, so
+    user B simply cannot address user A's files."""
+    _, hdrs_a = _auth()
+    _, hdrs_b = _auth()
+
+    up = client.post("/api/kb/upload", headers=hdrs_a, json={
+        "file_name": "confidential.txt",
+        "file_base64": _txt_b64("turbine bearing clearance is 0.42mm"),
+        "file_mime_type": "text/plain",
+    })
+    assert up.status_code == 200, up.text
+    doc_id = up.json()["document_id"]
+
+    # B cannot see A's document in their own listing...
+    assert client.get("/api/kb/list", headers=hdrs_b).json()["documents"] == []
+    # ...nor read it by naming A's document_id directly...
+    assert client.get(f"/api/kb/{doc_id}/raw", headers=hdrs_b).status_code == 404
+    assert client.get(f"/api/kb/{doc_id}/preview", headers=hdrs_b).status_code == 404
+    # ...and a delete by B must not destroy A's file.
+    client.request("DELETE", f"/api/kb/{doc_id}", headers=hdrs_b)
+    assert client.get(f"/api/kb/{doc_id}/raw", headers=hdrs_a).status_code == 200
+
+    client.request("DELETE", f"/api/kb/{doc_id}", headers=hdrs_a)
 
 
 def test_preview_generated_file_in_files_dir():
