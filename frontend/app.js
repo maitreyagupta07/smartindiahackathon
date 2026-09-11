@@ -206,7 +206,7 @@ const Api = {
 
   /** Current/global sweep of this machine's own outbound TCP connections. */
   async getNetworkStatus() {
-    const res = await fetch(`${API_BASE}/api/network-status`);
+    const res = await fetch(`${API_BASE}/api/network-status`, { headers: authHeaders() });
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `network-status failed (${res.status})`);
     return body;
@@ -214,7 +214,7 @@ const Api = {
 
   /** Network-security record accumulated for one task (start + end sample). */
   async getTaskNetworkStatus(taskId) {
-    const res = await fetch(`${API_BASE}/api/network-status/${encodeURIComponent(taskId)}`);
+    const res = await fetch(`${API_BASE}/api/network-status/${encodeURIComponent(taskId)}`, { headers: authHeaders() });
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `task network-status failed (${res.status})`);
     return body;
@@ -239,12 +239,20 @@ const Api = {
     return body;
   },
 
-  /** Probe the real backend once, briefly, so the UI can honestly signal live-vs-demo mode. */
+  /** Probe the real backend once, briefly, so the UI can honestly signal live-vs-demo mode.
+   *
+   *  Hits GET /health — unauthenticated by design, and the ONLY endpoint
+   *  that answers the question actually being asked ("is the server up?").
+   *  This used to probe /api/audit-log, which worked only for as long as
+   *  that endpoint was unauthenticated; once it was correctly restricted to
+   *  admins it returned 403, res.ok went false, and every page decided the
+   *  backend was down and silently fell back to illustrative demo data. A
+   *  liveness check must never depend on the caller's privileges. */
   async probe(timeoutMs = 1500) {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
-      const res = await fetch(`${API_BASE}/api/audit-log`, { signal: ctrl.signal });
+      const res = await fetch(`${API_BASE}/health`, { signal: ctrl.signal });
       clearTimeout(t);
       return res.ok;
     } catch {
@@ -254,13 +262,14 @@ const Api = {
 };
 
 /**
- * UserAuth — a lightweight, CLIENT-SIDE-ONLY account gate for the User
- * workbench, mirroring AdminAuth's own documented pattern (see its comment
- * above): the locked backend contract has no login/session/account API, so
- * this is a real UI access gate — accounts are meaningful and persistent on
- * THIS browser — but not a substitute for real server-side authentication.
- * If/when the contract adds a real auth endpoint, this module is the only
- * place that needs to change.
+ * UserAuth — the User workbench's sign-in, backed by REAL server-side
+ * authentication (app/api/auth.py): passwords are PBKDF2-hashed in SQLite
+ * and a bearer token proves identity on every API call.
+ *
+ * This was previously a client-side-only gate whose accounts lived in
+ * localStorage, which meant the APIs behind it accepted whatever user_id a
+ * caller chose to send. What remains local is presentation state only —
+ * the nickname shown in the greeting, and the per-tab session marker.
  *
  * A signed-in account's chosen User ID becomes Store.USER_ID itself (see
  * below) — the same identifier already used to key every task, chat, and
