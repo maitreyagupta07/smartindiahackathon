@@ -1066,6 +1066,47 @@ def _build_comparison_prompt(original_prompt: str) -> str:
     )
 
 
+# Minimum retrieval `score` (see docsearch.py's `1.0 / (1.0 + dist)`) a
+# chat's search_docs results must clear, at their single BEST match, before
+# the retrieved passages are treated as relevant to the CURRENT question at
+# all. Below this, the uploaded document(s) stay attached to the chat and
+# fully searchable again on the next message — only THIS question's prompt
+# skips the Knowledge Base block entirely and answers normally, the same way
+# the "no results" branch below already does for an empty chat KB.
+#
+# Deliberately loose (not the tight per-passage cutoff _build_chat_prompt's
+# own docstring already explains is unreliable for two SIMILAR, same-domain
+# queries — 0.37 on-topic vs 0.34 off-topic, observed on this corpus). This
+# threshold instead targets the much coarser, much more common case this
+# bug report is actually about: a question from a completely different
+# domain than the uploaded document (e.g. "who is the Prime Minister of
+# India" against an assignment PDF), which scores well below either of
+# those close same-domain numbers. A same-domain borderline case still
+# reaches Qwen with the passages attached, same as before — resolving that
+# finer distinction is left to the existing prompt-level "use them only if
+# they genuinely help" instruction below, which is what it was designed for.
+CHAT_KB_RELEVANCE_THRESHOLD = 0.30
+
+
+def _relevant_chat_results(tool_observation: dict, threshold: float = CHAT_KB_RELEVANCE_THRESHOLD) -> dict:
+    """
+    Gates a chat's search_docs observation on whether it's actually relevant
+    to the question that triggered it, using the retrieval scores search_docs
+    already computed — no separate relevance model/architecture. If the best
+    (highest-scoring) result doesn't clear `threshold`, the whole retrieval is
+    treated as if nothing was found, so the caller's existing "no relevant
+    passages" handling (in _build_chat_prompt and _sources_from_results)
+    applies uniformly instead of a second code path.
+    """
+    results = (tool_observation or {}).get("results", []) or []
+    if not results:
+        return tool_observation or {}
+    best = max((r.get("score") or 0.0) for r in results)
+    if best < threshold:
+        return {**(tool_observation or {}), "results": []}
+    return tool_observation
+
+
 def _build_chat_prompt(question: str, history: Optional[list], tool_observation: dict) -> str:
     """
     Assembles the chat-flow prompt for Qwen:
@@ -1668,11 +1709,13 @@ def decide_next_step(state: TaskState) -> NextStep:
 
         if last.tool_name == "search_docs":
             if state.task_type == "chat":
-                state.sources = _sources_from_results(last.observation or {})
-                chat_prompt = _build_chat_prompt(state.prompt, state.history, last.observation or {})
+                gated_observation = _relevant_chat_results(last.observation or {})
+                state.sources = _sources_from_results(gated_observation)
+                chat_prompt = _build_chat_prompt(state.prompt, state.history, gated_observation)
                 print(
                     f"[PLANNER] task_id={state.task_id} chat KB retrieval observed "
-                    f"({len(state.sources)} source(s)) -> chaining to call_qwen with conversation context"
+                    f"({len(state.sources)} source(s) above relevance threshold "
+                    f"{CHAT_KB_RELEVANCE_THRESHOLD}) -> chaining to call_qwen with conversation context"
                 )
                 return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=chat_prompt)
             # Expose which corpus document(s) grounded the answer so the UI's
