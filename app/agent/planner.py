@@ -864,6 +864,47 @@ def _is_valid_file_content(obj) -> bool:
     )
 
 
+# Common openers a small local model produces when it was asked to write
+# about a document/image it wasn't actually given any content for — e.g.
+# "I'm sorry, but I am not able to access or view uploaded files directly".
+# Observed live: nothing checked for this before, so that exact sentence
+# became a generated file's TITLE. Deliberately simple substring matching,
+# same style as this module's other keyword-based checks — not meant to
+# catch every possible refusal, only the common, characteristic ones.
+_REFUSAL_PATTERNS = (
+    "i'm sorry", "i am sorry", "i apologize", "i apologise",
+    "cannot access", "can't access", "not able to access",
+    "do not have access", "don't have access",
+    "cannot view", "can't view", "cannot read", "can't read",
+    "unable to access", "unable to view", "unable to read",
+    "as an ai", "i do not have the ability", "i don't have the ability",
+)
+
+
+def _looks_like_refusal(text: str) -> bool:
+    """
+    True when generated content reads like a model apology/refusal rather
+    than the actual requested content. Used as an ADDITIONAL check on top
+    of _is_valid_file_content — a refusal sentence is structurally valid
+    (a real title string, a real non-empty section) but must never silently
+    become a generated file's content.
+    """
+    lowered = (text or "").lower()
+    return any(p in lowered for p in _REFUSAL_PATTERNS)
+
+
+def _is_usable_file_content(obj) -> bool:
+    """_is_valid_file_content, plus a check that the content isn't actually
+    a refusal/apology (see _looks_like_refusal) — the combined gate that
+    decides whether generated content is safe to hand to generate_file."""
+    if not _is_valid_file_content(obj):
+        return False
+    combined = str(obj.get("title", "")) + " " + " ".join(
+        str(s.get("body", "")) for s in obj.get("sections", [])
+    )
+    return not _looks_like_refusal(combined)
+
+
 def _build_reasoning_prompt(
     original_prompt: str, moondream_observation: str, ocr_text: Optional[str] = None
 ) -> str:
@@ -1336,6 +1377,25 @@ def _filegen_codegen_step(state: TaskState, retry: bool = False) -> NextStep:
     )
 
 
+def _lora_content_prep_step(state: TaskState) -> NextStep:
+    """
+    The approval-note LoRA's content-prep call — factored out so the normal
+    entry point and a content-retry (see _is_usable_file_content's caller
+    below) build the EXACT same prompt instead of drifting out of sync.
+    Grounded in _ground_prompt_in_pdf_text(state, ...): a directly-attached
+    PDF's extracted text, plus (new) whatever the multi-tool workflow queue
+    already gathered — see state.workflow_context / SUPPORTED_WORKFLOW_STAGES
+    and app/agent/loop.py's automatic chat-KB stage for document-generation.
+    """
+    core_prompt = _strip_file_format_phrase(state.prompt)
+    return NextStep(
+        action="call_qwen",
+        model=LORA_ADAPTER,
+        prompt=FILEGEN_CONTENT_MARKER + _ground_prompt_in_pdf_text(state, core_prompt),
+        temperature=LORA_TEMPERATURE,
+    )
+
+
 def _filegen_entry_step(state: TaskState) -> NextStep:
     """
     Decides the first Qwen call for producing state.file_type — the SAME
@@ -1371,13 +1431,7 @@ def _filegen_entry_step(state: TaskState) -> NextStep:
             f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
             f"-> call_qwen model={LORA_ADAPTER} (approval-note LoRA, trained free-text format)"
         )
-        core_prompt = _strip_file_format_phrase(state.prompt)
-        return NextStep(
-            action="call_qwen",
-            model=LORA_ADAPTER,
-            prompt=FILEGEN_CONTENT_MARKER + _ground_prompt_in_pdf_text(state, core_prompt),
-            temperature=LORA_TEMPERATURE,
-        )
+        return _lora_content_prep_step(state)
     print(
         f"[PLANNER] task_id={state.task_id} filegen[{state.file_index}]={state.file_type} "
         f"-> call_qwen model={filegen_model} (content-preparation stage)"
@@ -1444,8 +1498,18 @@ def _stage_entry_step(state: TaskState, stage_type: str) -> NextStep:
     """
     if stage_type == "doc-search":
         top_k = 8 if _looks_like_comparison(state.prompt) else 5
-        print(f"[PLANNER] task_id={state.task_id} workflow stage 'doc-search' -> call_tool(search_docs) top_k={top_k}")
-        return NextStep(action="call_tool", tool_name="search_docs", tool_args={"query": state.prompt, "top_k": top_k})
+        tool_args = {"query": state.prompt, "top_k": top_k}
+        # Inside a chat, search that chat's own uploaded Knowledge Base (+
+        # the operator's persistent global KB) — the SAME scope/mechanism
+        # the "chat" task_type already uses — rather than the general
+        # corpus. Without this, a doc-search stage queued ahead of e.g. a
+        # document-generation request never sees the document the user
+        # actually uploaded to THIS chat.
+        if state.chat_id:
+            tool_args["chat_id"] = state.chat_id
+            tool_args["user_id"] = state.user_id
+        print(f"[PLANNER] task_id={state.task_id} workflow stage 'doc-search' -> call_tool(search_docs) top_k={top_k} chat_id={state.chat_id!r}")
+        return NextStep(action="call_tool", tool_name="search_docs", tool_args=tool_args)
 
     if stage_type == "code-execution":
         print(f"[PLANNER] task_id={state.task_id} workflow stage 'code-execution' -> call_qwen (codegen)")
@@ -1479,7 +1543,19 @@ def _continue_stage(state: TaskState, last: StepRecord) -> Optional[NextStep]:
 
     if stage == "doc-search":
         if last.action == "call_tool" and last.tool_name == "search_docs":
-            results = (last.observation or {}).get("results", []) or []
+            observation = last.observation or {}
+            # Chat-scoped retrieval reuses the EXACT SAME relevance gate the
+            # "chat" task_type already applies (_relevant_chat_results) — a
+            # chat's Knowledge Base always returns its top-k regardless of
+            # whether the query actually concerns it, so an unrelated
+            # document-generation request must never get someone else's
+            # uploaded document forced into its content just because a
+            # chat KB happens to exist. A plain corpus-wide doc-search stage
+            # (no chat_id) is left as-is, same as the standalone doc-search
+            # task_type — an explicit search is inherently on-topic already.
+            if state.chat_id:
+                observation = _relevant_chat_results(observation)
+            results = observation.get("results", []) or []
             if results:
                 passages = "\n\n".join(
                     f"[{r.get('source', 'unknown')}] {r.get('text', '')}" for r in results
@@ -1489,10 +1565,10 @@ def _continue_stage(state: TaskState, last: StepRecord) -> Optional[NextStep]:
                 # flows already expose on the response, so a multi-tool task
                 # still cites what it actually retrieved.
                 existing = state.sources or []
-                state.sources = existing + _sources_from_results(last.observation or {})
+                state.sources = existing + _sources_from_results(observation)
             print(
                 f"[PLANNER] task_id={state.task_id} workflow stage 'doc-search' observed "
-                f"{len(results)} passage(s)"
+                f"{len(results)} passage(s){' (after relevance gating)' if state.chat_id else ''}"
             )
         return None
 
@@ -1863,7 +1939,8 @@ def decide_next_step(state: TaskState) -> NextStep:
             )
 
         if state.task_type == "document-generation" and (last.prompt_used or "").startswith(FILEGEN_CONTENT_MARKER):
-            if last.model_used == LORA_ADAPTER:
+            was_lora = last.model_used == LORA_ADAPTER
+            if was_lora:
                 # Adapter output is its own trained free-text approval-note
                 # format — parse it in code (see
                 # _approval_note_text_to_file_content) instead of trying to
@@ -1871,27 +1948,39 @@ def decide_next_step(state: TaskState) -> NextStep:
                 content = _approval_note_text_to_file_content(str(last.observation))
             else:
                 content = _parse_markdown_content(str(last.observation))
-                if not _is_valid_file_content(content):
-                    if state.filegen_content_retries < MAX_FILEGEN_CONTENT_RETRIES:
-                        state.filegen_content_retries += 1
-                        print(
-                            f"[PLANNER] task_id={state.task_id} filegen content-prep returned unparseable content "
-                            f"-> retrying ({state.filegen_content_retries}/{MAX_FILEGEN_CONTENT_RETRIES})"
-                        )
-                        return NextStep(
-                            action="call_qwen",
-                            model=_filegen_model(state.prompt),
-                            prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
-                                state.prompt, _last_execute_code_stdout(state), state=state,
-                                document_text=_accumulated_context_text(state),
-                            ),
-                            temperature=FILEGEN_STRUCTURED_TEMPERATURE,
-                        )
+
+            if not _is_usable_file_content(content):
+                # Covers BOTH failure modes with the same bounded retry: the
+                # content didn't parse into a real {title, sections} shape
+                # AND the case observed live — content that parses FINE but
+                # is actually a refusal/apology ("I'm sorry, I can't access
+                # uploaded files...") because nothing was actually grounding
+                # the model, which used to sail straight into generate_file
+                # as the file's own title. Applies to the LoRA branch too,
+                # which previously had no retry/validity check at all.
+                if state.filegen_content_retries < MAX_FILEGEN_CONTENT_RETRIES:
+                    state.filegen_content_retries += 1
+                    reason = "looked like a refusal/apology" if _is_valid_file_content(content) else "unparseable content"
                     print(
-                        f"[PLANNER] task_id={state.task_id} filegen content-prep returned unparseable content "
-                        f"after {state.filegen_content_retries} retry(ies) -> falling back to raw-prompt content"
+                        f"[PLANNER] task_id={state.task_id} filegen content-prep returned {reason} "
+                        f"-> retrying ({state.filegen_content_retries}/{MAX_FILEGEN_CONTENT_RETRIES})"
                     )
-                    content = _build_generate_file_args(state.prompt, state=state)["content"]
+                    if was_lora:
+                        return _lora_content_prep_step(state)
+                    return NextStep(
+                        action="call_qwen",
+                        model=_filegen_model(state.prompt),
+                        prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
+                            state.prompt, _last_execute_code_stdout(state), state=state,
+                            document_text=_accumulated_context_text(state),
+                        ),
+                        temperature=FILEGEN_STRUCTURED_TEMPERATURE,
+                    )
+                print(
+                    f"[PLANNER] task_id={state.task_id} filegen content-prep still unusable "
+                    f"after {state.filegen_content_retries} retry(ies) -> falling back to raw-prompt content"
+                )
+                content = _build_generate_file_args(state.prompt, state=state)["content"]
             state.prepared_file_content = content
             file_type = state.file_type or _detect_file_type(state.prompt)
             print(

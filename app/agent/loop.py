@@ -19,6 +19,8 @@ C's existing endpoints through clients/tools_client.py — no duplicate tool
 logic lives here), persistent step/observation history, and hard max-step
 protection so a planner bug can never hang a request indefinitely.
 """
+import asyncio
+
 from ..router.router import route_task
 from ..router.classifier import classify as classify_prompt
 from .state import TaskState
@@ -38,6 +40,7 @@ from ..tools.pdf_extract import (
     render_first_page_png_base64,
     extract_text_from_pdf,
 )
+from ..tools import docsearch
 from ..router.model_registry import IMAGE_MODEL, TIMESERIES_MODEL
 from ..schemas.task import ExecuteTaskRequest, ExecuteTaskResponse, TaskResult
 
@@ -176,6 +179,51 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                     f"[LOOP] task_id={req.task_id} multi-tool workflow detected -> "
                     f"queued stages {state.pending_stages} before task_type={task_type!r}'s own flow "
                     f"(max_steps now {state.max_steps})"
+                )
+
+        # Automatic chat-KB grounding for document-generation: a request
+        # like "read this report and draft an approval note" inside a chat
+        # that already has an uploaded document needs to actually READ that
+        # document before writing anything — but that's not something a
+        # user should have to separately name with search-y keywords (the
+        # is_multi_step detector above requires exactly that, on purpose,
+        # for genuinely UNRELATED extra actions like "...and also make a
+        # diagram"). Reading the chat's own document is inherent to
+        # "draft a note about it", not an extra action, so this queues the
+        # SAME doc-search stage unconditionally whenever it's plausibly
+        # relevant: task_type is document-generation, this is a chat, no
+        # PDF is already attached directly to this message (that already
+        # grounds via _ground_prompt_in_pdf_text), and the chat actually
+        # has at least one uploaded document (checked directly against the
+        # chat-KB store — no model call, negligible cost — so a chat with
+        # nothing uploaded gets ZERO extra behavior, unchanged from before).
+        # planner._stage_entry_step's doc-search branch searches THIS
+        # chat's own KB (+ the operator's global KB) when chat_id is set,
+        # and planner._continue_stage relevance-gates the result the same
+        # way the "chat" task_type already does, so an irrelevant/unrelated
+        # document-generation request still isn't forced to use it.
+        chat_id = getattr(req, "chat_id", None)
+        has_attached_pdf = bool(req.file_base64 and is_pdf_mime(req.file_mime_type))
+        if (
+            task_type == "document-generation"
+            and chat_id
+            and not has_attached_pdf
+            and "doc-search" not in state.pending_stages
+        ):
+            try:
+                # Off the event loop, same as every other ChromaDB call in
+                # this codebase (see facade.py's search_docs) — §2.4's
+                # "must remain async all the way down" rule.
+                has_kb_docs = bool(await asyncio.to_thread(docsearch.list_chat_documents, chat_id))
+            except Exception as exc:  # noqa: BLE001 — a KB lookup failure must never block generation
+                print(f"[LOOP] task_id={req.task_id} chat-KB existence check failed ({exc}) -> skipping auto-grounding")
+                has_kb_docs = False
+            if has_kb_docs:
+                state.pending_stages.insert(0, "doc-search")
+                state.max_steps += 3
+                print(
+                    f"[LOOP] task_id={req.task_id} document-generation inside chat_id={chat_id!r} with an "
+                    f"uploaded document -> auto-queuing a doc-search stage (max_steps now {state.max_steps})"
                 )
 
         while not state.finished:
