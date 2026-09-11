@@ -153,6 +153,8 @@ DOC_SEARCH_SIGNALS = (
     ("search", 2, "action_verb"),
     ("find", 1, "action_verb"),          # weak alone ("find the leak" != doc-search)
     ("sop", 3, "domain_term"),
+    ("sops", 3, "domain_term"),          # plural — \b-wrapped phrases don't stem, same pattern as
+                                          # "inspection report"/"inspection reports" both being listed below
     ("manual", 2, "domain_term"),
     ("procedure", 2, "domain_term"),
     ("documentation", 2, "domain_term"),
@@ -234,6 +236,18 @@ IMAGE_GENERATION_SIGNALS = (
     ("image of", 3, "output_term"),
     ("picture of", 3, "output_term"),
     ("photo of", 2, "output_term"),
+    # Diagram/chart phrasing — a request for a visual diagram of a process,
+    # workflow, or structure is just as much an image-generation request as
+    # "draw a picture of X"; without these, a perfectly common ask like
+    # "create a diagram of the workflow" scored 0 on this task type.
+    ("visual diagram", 5, "contextual_phrase"),
+    ("diagram of", 5, "output_term"),
+    ("flowchart of", 5, "output_term"),
+    ("flow chart of", 5, "output_term"),
+    ("chart of", 3, "output_term"),
+    ("illustration of", 4, "output_term"),
+    ("diagram", 3, "domain_term"),
+    ("flowchart", 3, "domain_term"),
 )
 
 TIME_SERIES_FORECASTING_SIGNALS = (

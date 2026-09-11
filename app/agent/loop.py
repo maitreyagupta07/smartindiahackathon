@@ -28,6 +28,7 @@ from .planner import (
     FILEGEN_CODE_MARKER,
     FILEGEN_CONTENT_MARKER,
     strip_markdown_emphasis,
+    SUPPORTED_WORKFLOW_STAGES,
 )
 from ..inference.client import call_inference
 from ..tools.facade import execute_code, search_docs, generate_file, scan_document, generate_image, forecast_timeseries
@@ -142,6 +143,40 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
         )
         state.task_type = task_type
         state.needs_reasoning = needs_reasoning
+
+        # Multi-tool workflow: classify() (app/router/classifier.py) already
+        # detects when a prompt genuinely names more than one distinct
+        # tool/task signal (is_multi_step/workflow, scored the exact same
+        # way task_type itself is) — previously computed but only ever used
+        # for a debug log line in router.py. Reusing that SAME signal here,
+        # rather than a second/different relevance system, is what lets one
+        # request chain multiple tools instead of being forced through
+        # task_type's single flow alone. Only stages this planner has a
+        # dedicated gathering handler for (SUPPORTED_WORKFLOW_STAGES) are
+        # queued — anything else (e.g. vision, time-series-forecasting,
+        # which aren't scored alongside these the same way) is left out
+        # rather than guessed at; state.task_type's own single-tool flow is
+        # completely unaffected when this queue ends up empty, which is the
+        # normal case for an ordinary single-purpose request.
+        classification = classify_prompt(req.prompt, state.file_mime_type)
+        if classification.is_multi_step and classification.workflow:
+            state.pending_stages = [
+                t for t in classification.workflow
+                if t != task_type and t in SUPPORTED_WORKFLOW_STAGES
+            ]
+            if state.pending_stages:
+                # Each queued stage costs a small, bounded number of extra
+                # steps (its own tool call, plus at most one Qwen call) on
+                # top of whatever the primary task_type's own flow already
+                # budgets for — the same kind of +N-slack bump
+                # planner._filegen_entry_step already does for a
+                # multi-deliverable document-generation request.
+                state.max_steps += 3 * len(state.pending_stages)
+                print(
+                    f"[LOOP] task_id={req.task_id} multi-tool workflow detected -> "
+                    f"queued stages {state.pending_stages} before task_type={task_type!r}'s own flow "
+                    f"(max_steps now {state.max_steps})"
+                )
 
         while not state.finished:
             next_step: NextStep = decide_next_step(state)

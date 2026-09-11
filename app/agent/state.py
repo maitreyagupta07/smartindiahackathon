@@ -61,6 +61,32 @@ class TaskState:
     # combine it with Moondream's own observation instead of losing it.
     pdf_ocr_text: str | None = None
 
+    # Multi-tool workflow orchestration — set by run_agent_loop right after
+    # classification, from classifier.classify()'s existing is_multi_step/
+    # workflow fields, when a prompt genuinely names more than one distinct
+    # tool/task signal (e.g. "search the SOPs, make a diagram, and put it in
+    # a PowerPoint"). pending_stages holds every OTHER qualifying task_type
+    # besides the primary one (state.task_type), in the order classify()
+    # detected them — each one a "gathering" stage (doc-search /
+    # code-execution / image-generation; see planner.SUPPORTED_WORKFLOW_STAGES)
+    # that runs to completion BEFORE the primary flow starts, via
+    # planner._stage_entry_step/_continue_stage. active_stage is whichever
+    # one is currently in progress (None when no stage is running — either
+    # before the queue starts, or after it's been fully drained).
+    # workflow_context accumulates each finished stage's useful result as
+    # plain text (retrieved passages, verified computed output, a generated
+    # image's location), in completion order, so later stages AND the
+    # primary flow's own content-prep/reasoning step can build on earlier
+    # ones instead of only ever seeing the raw user prompt. primary_started
+    # marks whether the primary task_type's own entry step has already run
+    # — needed because that entry step is no longer reachable via
+    # step_count == 0 once workflow stages exist (they run first and
+    # consume their own steps).
+    pending_stages: list[str] = field(default_factory=list)
+    active_stage: str | None = None
+    workflow_context: list[str] = field(default_factory=list)
+    primary_started: bool = False
+
     # last model actually called — kept for the contract's top-level
     # `model_used` field (§2.4). For multi-model chains this is the model
     # of the FINAL step, since that's what actually produced the answer.

@@ -71,7 +71,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal, Optional
 
-from .state import TaskState
+from .state import TaskState, StepRecord
 from ..router.model_registry import TEXT_MODEL, VISION_MODEL, LORA_ADAPTER, is_approval_note_request
 from ..router.classifier import (
     FILE_FORMAT_KEYWORDS,
@@ -711,23 +711,37 @@ def _attached_pdf_text(state: TaskState) -> str:
     return extract_text_from_pdf(state.file_base64)
 
 
+def _accumulated_context_text(state: TaskState) -> str:
+    """
+    Every OTHER real piece of context gathered for this request so far,
+    combined into one text blob: state.workflow_context (retrieved
+    passages / verified computed output / a generated image's location —
+    accumulated by earlier multi-tool workflow stages, see
+    state.pending_stages) plus the attached PDF's extracted text, if any
+    (see _attached_pdf_text). "" when there's nothing to ground in.
+    """
+    blocks = list(state.workflow_context)
+    extracted = _attached_pdf_text(state)
+    if extracted:
+        blocks.append(f"Extracted document content:\n{extracted}")
+    return "\n\n".join(blocks)
+
+
 def _ground_prompt_in_pdf_text(state: TaskState, base_prompt: str) -> str:
     """
-    Appends `state`'s attached PDF's extracted text (see _attached_pdf_text)
-    to `base_prompt` so whatever model is called next — the approval-note
-    LoRA adapter, or the plain TEXT_MODEL entry point — actually sees the
-    document's real content instead of just the user's wording about it.
-    Falls back to the plain prompt, unchanged, when there's no PDF or
-    nothing could be extracted from it.
+    Appends _accumulated_context_text(state) — the attached PDF's extracted
+    text AND, when this request ran through the multi-tool workflow queue,
+    every earlier stage's accumulated result — to `base_prompt`, so whatever
+    model is called next (the approval-note LoRA adapter, or the plain
+    TEXT_MODEL entry point) actually sees that real content instead of just
+    the user's wording about it. Falls back to the plain prompt, unchanged,
+    when there's nothing to ground in.
     """
-    extracted = _attached_pdf_text(state)
-    if not extracted:
+    context = _accumulated_context_text(state)
+    if not context:
         return base_prompt
-    print(
-        f"[PLANNER] task_id={state.task_id} grounding prompt in extracted PDF text "
-        f"({len(extracted)} chars)"
-    )
-    return f"{base_prompt}\n\nExtracted document content:\n{extracted}"
+    print(f"[PLANNER] task_id={state.task_id} grounding prompt in accumulated context ({len(context)} chars)")
+    return f"{base_prompt}\n\n{context}"
 
 
 _FILE_FORMAT_TRAILING_FILLER_RE = re.compile(r"^\s*(of|for|about|as a|as an|in)\b", re.IGNORECASE)
@@ -1372,10 +1386,162 @@ def _filegen_entry_step(state: TaskState) -> NextStep:
         action="call_qwen",
         model=filegen_model,
         prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
-            state.prompt, None, state=state, document_text=_attached_pdf_text(state)
+            state.prompt, None, state=state, document_text=_accumulated_context_text(state)
         ),
         temperature=FILEGEN_STRUCTURED_TEMPERATURE,
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-tool workflow stages
+#
+# A "stage" is one OTHER qualifying task_type classify() detected in the
+# prompt besides the primary one (see state.pending_stages' docstring in
+# app/agent/state.py and app/agent/loop.py's population of it right after
+# routing). Each stage function below issues the EXACT SAME action that
+# task_type already issues when it runs standalone — _stage_entry_step's
+# doc-search branch is identical to decide_next_step's own doc-search
+# step-0 branch, etc. — so this is purely a SEQUENCING layer on top of
+# logic that already existed; adding a new stage type later is one more
+# branch here, not a rewrite of decide_next_step.
+# ---------------------------------------------------------------------------
+
+# Only task types with a bounded, well-defined "gather something useful"
+# meaning are eligible to run as a queued stage ahead of the primary flow.
+# document-generation/text-generation are always the PRIMARY (terminal)
+# flow, never a stage; vision/time-series-forecasting/chat aren't scored
+# alongside the others in classify() the same way and stay entry-point-only
+# task types for now (see this fix's "assumptions/limitations").
+SUPPORTED_WORKFLOW_STAGES = frozenset({"doc-search", "code-execution", "image-generation"})
+
+
+def _build_image_prompt_distillation(state: TaskState) -> str:
+    """
+    Asks Qwen for a short, concrete text-to-image prompt for the
+    image-generation stage, grounded in whatever earlier stages already
+    found (state.workflow_context) rather than the raw user request, which
+    typically also names OTHER deliverables ("...and put it in a
+    PowerPoint") that would only confuse a text-to-image model.
+    """
+    context = "\n\n".join(state.workflow_context)
+    context_block = f"Information already gathered for this request:\n---\n{context}\n---\n\n" if context else ""
+    return (
+        "You are preparing a prompt for a local text-to-image model, as one step "
+        "of a larger request.\n\n"
+        f"Original request: \"{state.prompt}\"\n\n"
+        f"{context_block}"
+        "Write ONE short, concrete visual description (1-3 sentences) of the "
+        "specific image/diagram this request needs — describe what should "
+        "actually be drawn, not the surrounding task. Respond with ONLY that "
+        "description, no commentary, no markdown, no quotation marks."
+    )
+
+
+def _stage_entry_step(state: TaskState, stage_type: str) -> NextStep:
+    """
+    First action for one queued workflow stage (state.active_stage). Each
+    branch reuses that task_type's own normal step-0 logic unchanged.
+    """
+    if stage_type == "doc-search":
+        top_k = 8 if _looks_like_comparison(state.prompt) else 5
+        print(f"[PLANNER] task_id={state.task_id} workflow stage 'doc-search' -> call_tool(search_docs) top_k={top_k}")
+        return NextStep(action="call_tool", tool_name="search_docs", tool_args={"query": state.prompt, "top_k": top_k})
+
+    if stage_type == "code-execution":
+        print(f"[PLANNER] task_id={state.task_id} workflow stage 'code-execution' -> call_qwen (codegen)")
+        return NextStep(
+            action="call_qwen",
+            model=TEXT_MODEL,
+            prompt=CODEEXEC_CODE_MARKER + _build_codeexec_code_prompt(state.prompt),
+        )
+
+    if stage_type == "image-generation":
+        print(f"[PLANNER] task_id={state.task_id} workflow stage 'image-generation' -> call_qwen (prompt distillation)")
+        return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=_build_image_prompt_distillation(state))
+
+    # Defensive only — state.pending_stages is filtered to
+    # SUPPORTED_WORKFLOW_STAGES before it's ever set (see loop.py), so this
+    # branch should be unreachable in practice. Fails loudly rather than
+    # guessing at an action for a stage type this function doesn't know.
+    raise ValueError(f"no workflow-stage handler for task_type {stage_type!r}")
+
+
+def _continue_stage(state: TaskState, last: StepRecord) -> Optional[NextStep]:
+    """
+    Advances the CURRENTLY active stage (state.active_stage) by one step,
+    given the just-observed `last` step. Returns the next NextStep for this
+    stage, or None once the stage is finished (its result, if any, has
+    already been folded into state.workflow_context by this point) — the
+    caller (decide_next_step) then moves on to the next queued stage, or to
+    the primary flow once the queue is empty.
+    """
+    stage = state.active_stage
+
+    if stage == "doc-search":
+        if last.action == "call_tool" and last.tool_name == "search_docs":
+            results = (last.observation or {}).get("results", []) or []
+            if results:
+                passages = "\n\n".join(
+                    f"[{r.get('source', 'unknown')}] {r.get('text', '')}" for r in results
+                )
+                state.workflow_context.append(f"Retrieved from the knowledge base:\n{passages}")
+                # Reuses the SAME sources shape the standalone doc-search/chat
+                # flows already expose on the response, so a multi-tool task
+                # still cites what it actually retrieved.
+                existing = state.sources or []
+                state.sources = existing + _sources_from_results(last.observation or {})
+            print(
+                f"[PLANNER] task_id={state.task_id} workflow stage 'doc-search' observed "
+                f"{len(results)} passage(s)"
+            )
+        return None
+
+    if stage == "code-execution":
+        if last.action == "call_qwen" and (last.prompt_used or "").startswith(CODEEXEC_CODE_MARKER):
+            code = _extract_code(str(last.observation))
+            if not _is_usable_python(code):
+                print(
+                    f"[PLANNER] task_id={state.task_id} workflow stage 'code-execution' produced no "
+                    f"usable Python -> skipping this stage rather than failing the whole request"
+                )
+                return None
+            return NextStep(action="call_tool", tool_name="execute_code", tool_args={"code": code, "language": "python"})
+        if last.action == "call_tool" and last.tool_name == "execute_code":
+            obs = last.observation or {}
+            stdout = (obs.get("stdout") or "").strip()
+            if obs.get("exit_code") == 0 and stdout:
+                state.workflow_context.append(f"Verified computed result:\n{stdout}")
+            print(f"[PLANNER] task_id={state.task_id} workflow stage 'code-execution' observed exit_code={obs.get('exit_code')}")
+        return None
+
+    if stage == "image-generation":
+        if last.action == "call_qwen":
+            image_prompt = strip_markdown_emphasis(str(last.observation)).strip() or state.prompt
+            print(f"[PLANNER] task_id={state.task_id} workflow stage 'image-generation' -> call_tool(generate_image)")
+            return NextStep(action="call_tool", tool_name="generate_image", tool_args={"prompt": image_prompt})
+        if last.action == "call_tool" and last.tool_name == "generate_image":
+            obs = last.observation or {}
+            generated = {"file_url": obs.get("file_url"), "file_name": obs.get("file_name")}
+            # Recorded in generated_files (so result.files still lists it)
+            # but deliberately NOT into state.file_url/file_name — those
+            # back-compat "primary file" fields must end up pointing at the
+            # request's actual deliverable (e.g. the PPTX the primary
+            # document-generation flow produces next), not at a supporting
+            # image generated as an intermediate ingredient for it. A
+            # standalone image-generation request (task_type=="image-generation"
+            # itself, no queued stages) is unaffected — that's handled by
+            # decide_next_step's own generate_image completion, not here.
+            state.generated_files.append(generated)
+            if generated["file_url"]:
+                state.workflow_context.append(
+                    f"A supporting image/diagram was generated for this request and is available as a "
+                    f"separate file (filename: {generated['file_name']}, url: {generated['file_url']}). "
+                    f"Reference it by filename where relevant rather than describing pixels you can't see."
+                )
+            print(f"[PLANNER] task_id={state.task_id} workflow stage 'image-generation' observed file_url={generated['file_url']}")
+        return None
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1394,9 +1560,83 @@ def decide_next_step(state: TaskState) -> NextStep:
         return NextStep(action="finalize")
 
     n = state.step_count  # steps already executed so far
+    last = state.step_records[-1] if state.step_records else None
 
-    # --- Step 0: nothing executed yet -> decide the entry point ---
-    if n == 0:
+    # --- Error handling: checked FIRST, uniformly, before either a
+    # multi-tool workflow stage (below) or the primary task_type's own flow
+    # gets to react to the last step — a bounded tool retry, or finalize
+    # with the error, exactly as this already worked before multi-tool
+    # workflows existed. Reusing this one check for both means a failed
+    # workflow-stage tool call (e.g. a gathering search_docs call) gets the
+    # exact same retry/finalize handling any other tool call already gets,
+    # with no separate/duplicate error-handling path to keep in sync.
+    if last is not None and last.status == "error":
+        # Tool calls get a bounded retry; model calls and repeated tool
+        # failures finalize with the error surfaced to the caller.
+        if last.action == "call_tool" and last.tool_name:
+            attempts = _tool_attempt_count(state, last.tool_name)
+            if attempts < MAX_TOOL_ATTEMPTS:
+                print(
+                    f"[PLANNER] task_id={state.task_id} tool '{last.tool_name}' failed "
+                    f"(attempt {attempts}/{MAX_TOOL_ATTEMPTS}) -> retrying same tool call"
+                )
+                return NextStep(
+                    action="call_tool",
+                    tool_name=last.tool_name,
+                    tool_args=_rebuild_tool_args(state, last),
+                )
+            print(
+                f"[PLANNER] task_id={state.task_id} tool '{last.tool_name}' failed "
+                f"{attempts}x -> giving up, finalize with error"
+            )
+            return NextStep(action="finalize")
+
+        print(f"[PLANNER] task_id={state.task_id} last step errored -> finalize")
+        return NextStep(action="finalize")
+
+    # --- Multi-tool workflow: run every queued gathering stage
+    # (state.pending_stages — doc-search / code-execution / image-generation
+    # signals classify() detected alongside the primary task_type, see
+    # app/agent/loop.py) before the primary task_type's own flow starts.
+    # Each stage reuses that SAME task_type's own normal step logic
+    # (_stage_entry_step/_continue_stage below just call the identical
+    # tool/model actions that task_type already uses standalone), so this
+    # only ever sequences multiple EXISTING single-purpose flows back to
+    # back — adding a new stage type is still just one more branch, exactly
+    # like adding a new standalone task_type already was.
+    if state.pending_stages or state.active_stage:
+        if state.active_stage is None:
+            state.active_stage = state.pending_stages.pop(0)
+            print(
+                f"[PLANNER] task_id={state.task_id} workflow stage -> starting "
+                f"'{state.active_stage}' (remaining after this: {state.pending_stages})"
+            )
+            return _stage_entry_step(state, state.active_stage)
+
+        stage_step = _continue_stage(state, last)
+        if stage_step is not None:
+            return stage_step
+
+        print(f"[PLANNER] task_id={state.task_id} workflow stage '{state.active_stage}' complete")
+        state.active_stage = None
+        if state.pending_stages:
+            state.active_stage = state.pending_stages.pop(0)
+            print(
+                f"[PLANNER] task_id={state.task_id} workflow stage -> starting "
+                f"'{state.active_stage}' (remaining after this: {state.pending_stages})"
+            )
+            return _stage_entry_step(state, state.active_stage)
+        # else: every queued stage is done -> fall through to the primary
+        # task_type's own entry step below, now grounded in
+        # state.workflow_context.
+
+    # --- Primary flow entry point: reached either at true step 0 (no
+    # queued workflow stages), or right after every queued stage above has
+    # finished (state.step_count > 0 by then, so this is keyed off
+    # state.primary_started rather than step_count — the primary flow's own
+    # logic below is completely unchanged either way). ---
+    if not state.primary_started:
+        state.primary_started = True
         if state.task_type == "vision":
             if _is_document_scan_request(state.prompt):
                 print(f"[PLANNER] task_id={state.task_id} step0 -> call_tool(scan_document) (handwritten/document scan request)")
@@ -1569,33 +1809,9 @@ def decide_next_step(state: TaskState) -> NextStep:
         print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={TEXT_MODEL} (text entry point)")
         return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=_ground_prompt_in_pdf_text(state, state.prompt))
 
-    # --- Step 1+: replan based on what happened last ---
-    last = state.step_records[-1]
-
-    if last.status == "error":
-        # Tool calls get a bounded retry; model calls and repeated tool
-        # failures finalize with the error surfaced to the caller.
-        if last.action == "call_tool" and last.tool_name:
-            attempts = _tool_attempt_count(state, last.tool_name)
-            if attempts < MAX_TOOL_ATTEMPTS:
-                print(
-                    f"[PLANNER] task_id={state.task_id} tool '{last.tool_name}' failed "
-                    f"(attempt {attempts}/{MAX_TOOL_ATTEMPTS}) -> retrying same tool call"
-                )
-                return NextStep(
-                    action="call_tool",
-                    tool_name=last.tool_name,
-                    tool_args=_rebuild_tool_args(state, last),
-                )
-            print(
-                f"[PLANNER] task_id={state.task_id} tool '{last.tool_name}' failed "
-                f"{attempts}x -> giving up, finalize with error"
-            )
-            return NextStep(action="finalize")
-
-        print(f"[PLANNER] task_id={state.task_id} last step errored -> finalize")
-        return NextStep(action="finalize")
-
+    # --- Step 1+ (of the primary flow): replan based on what happened last.
+    # `last` was already computed at the top of this function (it's also
+    # what the error handling and workflow-stage dispatch above use). ---
     if last.action == "call_moondream":
         if state.needs_reasoning:
             # image + reasoning -> Moondream -> observation -> Qwen -> final.
@@ -1667,7 +1883,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                             model=_filegen_model(state.prompt),
                             prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
                                 state.prompt, _last_execute_code_stdout(state), state=state,
-                                document_text=_attached_pdf_text(state),
+                                document_text=_accumulated_context_text(state),
                             ),
                             temperature=FILEGEN_STRUCTURED_TEMPERATURE,
                         )
@@ -1775,7 +1991,7 @@ def decide_next_step(state: TaskState) -> NextStep:
                     action="call_qwen",
                     model=filegen_model,
                     prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
-                        state.prompt, stdout, state=state, document_text=_attached_pdf_text(state)
+                        state.prompt, stdout, state=state, document_text=_accumulated_context_text(state)
                     ),
                     temperature=LORA_TEMPERATURE if filegen_model == LORA_ADAPTER else FILEGEN_STRUCTURED_TEMPERATURE,
                 )
