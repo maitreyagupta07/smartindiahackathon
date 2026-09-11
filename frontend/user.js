@@ -304,7 +304,7 @@ function renderTurn(turn) {
     const files = Array.isArray(result.files) && result.files.length > 1
       ? result.files
       : [{ file_url: result.file_url, file_name: result.file_name }];
-    body = files.map((f) => {
+    const deliverables = files.map((f) => {
       const fn = f.file_name || 'deliverable';
       const url = f.file_url || '#';
       return `
@@ -323,6 +323,18 @@ function renderTurn(turn) {
           </div>
         </div>`;
     }).join('<div style="height:8px"></div>');
+    // When the backend also rendered a plain-text summary of the SAME
+    // prepared content the file was generated from (result.text — see
+    // app/agent/planner.py's render_file_content_as_text), show it above
+    // the deliverable card(s) instead of the file being the only visible
+    // output — "give me the findings, then the doc, in one response".
+    // Absent for a pure image-generation result or a multi-deliverable
+    // request, in which case this is unchanged from before: just the
+    // card(s), same as always.
+    const summaryBlock = result.text
+      ? `<div class="ai-rich">${renderRichText(result.text)}</div>${renderSources(result.sources)}<div style="height:10px"></div>`
+      : '';
+    body = summaryBlock + deliverables;
   } else if (result.text) {
     const plain = answerToPlainText(result.text);
     body = `<div class="ai-rich">${renderRichText(result.text)}</div>${renderSources(result.sources)}` +
