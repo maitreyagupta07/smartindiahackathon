@@ -468,7 +468,10 @@ def _is_usable_python(code: str) -> bool:
 
 
 def _build_filegen_content_prompt(
-    original_prompt: str, verified_data: Optional[str], state: Optional[TaskState] = None
+    original_prompt: str,
+    verified_data: Optional[str],
+    state: Optional[TaskState] = None,
+    document_text: Optional[str] = None,
 ) -> str:
     """
     Asks Qwen to turn the user's request (optionally grounded in verified
@@ -508,6 +511,21 @@ def _build_filegen_content_prompt(
         f"alter, or shorten them):\n{verified_data}\n\n"
         if verified_data else ""
     )
+    # Text extracted from an attached scanned/typed document (see
+    # planner._attached_pdf_text and, for a scanned page with no text
+    # layer at all, app/agent/loop.py's vision detour combined into
+    # state.pdf_ocr_text) — the real source material for a request like
+    # "draft an approval note from this inspection report", grounded the
+    # same way verified_data grounds a computed value, but explicitly
+    # labeled as extracted/OCR text rather than "verified", since OCR on a
+    # scanned or handwritten page can be incomplete or wrong.
+    document_block = (
+        f"Content extracted from the attached document (OCR/text extraction — "
+        f"may be incomplete or contain errors, especially for handwriting; "
+        f"use it as the factual source, and do not invent details it doesn't "
+        f"support):\n{document_text}\n\n"
+        if document_text else ""
+    )
     if _looks_like_transcript(original_prompt):
         guidance_block = f"Follow this structure — one section per item:\n{_transcript_instructions()}\n\n"
     elif _looks_like_comparison(original_prompt):
@@ -538,6 +556,7 @@ def _build_filegen_content_prompt(
         f"User request: \"{original_prompt}\"\n\n"
         f"{scope_block}"
         f"{guidance_block}"
+        f"{document_block}"
         f"{data_block}"
         "Respond with PLAIN TEXT ONLY, in exactly this format (no JSON, no code "
         "fences, no commentary outside it):\n\n"
@@ -675,32 +694,40 @@ def _build_content_from_verified_data(prompt: str, stdout: str) -> Optional[dict
     return {"title": title, "sections": sections}
 
 
-def _build_lora_prompt(state: TaskState, base_prompt: str) -> str:
+def _attached_pdf_text(state: TaskState) -> str:
     """
-    If an uploaded PDF came with this approval-note request (a real or
-    scanned inspection report — contract §2.4's file_base64/file_mime_type),
-    ground the adapter's prompt in the report's actual extracted text
-    instead of writing a generic note out of thin air. Extraction is only
-    ever attempted here, for an approval-note request — a PDF attached to
-    an unrelated request is left completely alone (see PERSON_A_NOTES.md).
-    Falls back to the plain prompt if there's no file, it's not a PDF, or
-    nothing could be extracted from it (e.g. a scanned PDF on a machine
-    without tesseract-ocr installed) — never blocks the request on this.
+    Best-effort text for state.file_base64 when it's a PDF attached directly
+    to THIS request (contract §2.4's file_base64/file_mime_type) — direct
+    text if it has a real text layer, Tesseract-OCR'd text (via
+    pdf_extract.extract_text_from_pdf's existing two-stage extraction) if
+    it's scanned. "" when there's no PDF attached, or nothing could be
+    extracted from it (e.g. tesseract-ocr isn't installed on this machine)
+    — callers fall back to their existing no-grounding behavior rather than
+    blocking the request on this. A PDF attached to an unrelated request
+    that never reaches a caller of this helper is left completely alone.
     """
     if not (state.file_base64 and is_pdf(state.file_mime_type)):
-        return base_prompt
-    extracted = extract_text_from_pdf(state.file_base64)
+        return ""
+    return extract_text_from_pdf(state.file_base64)
+
+
+def _ground_prompt_in_pdf_text(state: TaskState, base_prompt: str) -> str:
+    """
+    Appends `state`'s attached PDF's extracted text (see _attached_pdf_text)
+    to `base_prompt` so whatever model is called next — the approval-note
+    LoRA adapter, or the plain TEXT_MODEL entry point — actually sees the
+    document's real content instead of just the user's wording about it.
+    Falls back to the plain prompt, unchanged, when there's no PDF or
+    nothing could be extracted from it.
+    """
+    extracted = _attached_pdf_text(state)
     if not extracted:
-        print(
-            f"[PLANNER] task_id={state.task_id} PDF uploaded but no text could be "
-            f"extracted (scanned page + no OCR available?) -> using prompt only"
-        )
         return base_prompt
     print(
-        f"[PLANNER] task_id={state.task_id} using extracted PDF text "
-        f"({len(extracted)} chars) as approval-note grounding"
+        f"[PLANNER] task_id={state.task_id} grounding prompt in extracted PDF text "
+        f"({len(extracted)} chars)"
     )
-    return f"{base_prompt}\n\nInspection report content:\n{extracted}"
+    return f"{base_prompt}\n\nExtracted document content:\n{extracted}"
 
 
 _FILE_FORMAT_TRAILING_FILLER_RE = re.compile(r"^\s*(of|for|about|as a|as an|in)\b", re.IGNORECASE)
@@ -823,16 +850,41 @@ def _is_valid_file_content(obj) -> bool:
     )
 
 
-def _build_reasoning_prompt(original_prompt: str, moondream_observation: str) -> str:
+def _build_reasoning_prompt(
+    original_prompt: str, moondream_observation: str, ocr_text: Optional[str] = None
+) -> str:
     """
     Combines the user's original request with Moondream's raw image
     description into a single prompt for the Qwen reasoning step.
+
+    `ocr_text` is set only when this image is actually a rendered page from
+    a scanned PDF with no text layer (see app/agent/loop.py's scanned-PDF
+    detour and state.pdf_ocr_text) — whatever direct/Tesseract-OCR text
+    pdf_extract.py still managed to pull from that page, handed to Qwen
+    alongside Moondream's own description so printed content Tesseract read
+    reliably and visual/handwritten content Moondream observed are both
+    available, rather than picking one source over the other. Qwen is told
+    explicitly to reconcile the two rather than silently trusting either.
     """
+    ocr_block = (
+        f"\nSeparately, OCR text extraction was also run on the same page "
+        f"(may be incomplete or contain errors, especially for handwriting):\n"
+        f"---\n{ocr_text}\n---\n"
+        if ocr_text else ""
+    )
+    reconcile_note = (
+        " If the OCR text and the image description disagree on a specific "
+        "value (a number, date, ID, or word), say so rather than silently "
+        "picking one — and never invent a reading for anything neither "
+        "source actually supports."
+        if ocr_text else ""
+    )
     return (
         f"An image was analyzed and described as follows:\n"
-        f"---\n{moondream_observation}\n---\n\n"
-        f"Based on that description, respond to the user's original request:\n"
-        f"\"{original_prompt}\""
+        f"---\n{moondream_observation}\n---\n"
+        f"{ocr_block}\n"
+        f"Based on that, respond to the user's original request:\n"
+        f"\"{original_prompt}\"{reconcile_note}"
     )
 
 
@@ -1309,7 +1361,7 @@ def _filegen_entry_step(state: TaskState) -> NextStep:
         return NextStep(
             action="call_qwen",
             model=LORA_ADAPTER,
-            prompt=FILEGEN_CONTENT_MARKER + _build_lora_prompt(state, core_prompt),
+            prompt=FILEGEN_CONTENT_MARKER + _ground_prompt_in_pdf_text(state, core_prompt),
             temperature=LORA_TEMPERATURE,
         )
     print(
@@ -1319,7 +1371,9 @@ def _filegen_entry_step(state: TaskState) -> NextStep:
     return NextStep(
         action="call_qwen",
         model=filegen_model,
-        prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, None, state=state),
+        prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
+            state.prompt, None, state=state, document_text=_attached_pdf_text(state)
+        ),
         temperature=FILEGEN_STRUCTURED_TEMPERATURE,
     )
 
@@ -1497,12 +1551,23 @@ def decide_next_step(state: TaskState) -> NextStep:
             return NextStep(
                 action="call_qwen",
                 model=LORA_ADAPTER,
-                prompt=_build_lora_prompt(state, state.prompt),
+                prompt=_ground_prompt_in_pdf_text(state, state.prompt),
                 temperature=LORA_TEMPERATURE,
             )
 
+        # A PDF attached directly to this request (contract §2.4's
+        # file_base64/file_mime_type) that still has a usable text layer —
+        # a scanned/handwritten one with NO text layer was already
+        # redirected to the vision model before task_type was even decided
+        # (see app/agent/loop.py's scanned-PDF detour) and never reaches
+        # this branch with task_type="text-generation" at all. This is what
+        # actually gets the document's real content to Qwen instead of just
+        # the user's prompt about it — without it, a plain "read this PDF
+        # and summarize it" request sent Qwen only the words "read this PDF
+        # and summarize it", with no document content at all, which is
+        # exactly what produced the "I can't read files/scans" replies.
         print(f"[PLANNER] task_id={state.task_id} step0 -> call_qwen model={TEXT_MODEL} (text entry point)")
-        return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=state.prompt)
+        return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=_ground_prompt_in_pdf_text(state, state.prompt))
 
     # --- Step 1+: replan based on what happened last ---
     last = state.step_records[-1]
@@ -1533,9 +1598,17 @@ def decide_next_step(state: TaskState) -> NextStep:
 
     if last.action == "call_moondream":
         if state.needs_reasoning:
-            # image + reasoning -> Moondream -> observation -> Qwen -> final
-            reasoning_prompt = _build_reasoning_prompt(state.prompt, str(last.observation))
-            print(f"[PLANNER] task_id={state.task_id} moondream observed -> chaining to call_qwen for reasoning")
+            # image + reasoning -> Moondream -> observation -> Qwen -> final.
+            # state.pdf_ocr_text is set only when this image is actually a
+            # rendered page from a scanned PDF (see app/agent/loop.py) — folds
+            # whatever OCR text was found in alongside Moondream's own
+            # description so handwritten/visual content and printed/OCR'd
+            # content both reach this reasoning step instead of just one.
+            reasoning_prompt = _build_reasoning_prompt(state.prompt, str(last.observation), state.pdf_ocr_text)
+            print(
+                f"[PLANNER] task_id={state.task_id} moondream observed -> chaining to call_qwen for reasoning"
+                f"{' (with OCR text from a scanned PDF page)' if state.pdf_ocr_text else ''}"
+            )
             return NextStep(action="call_qwen", model=TEXT_MODEL, prompt=reasoning_prompt)
         print(f"[PLANNER] task_id={state.task_id} moondream observed, no reasoning needed -> finalize")
         return NextStep(action="finalize")
@@ -1593,7 +1666,8 @@ def decide_next_step(state: TaskState) -> NextStep:
                             action="call_qwen",
                             model=_filegen_model(state.prompt),
                             prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
-                                state.prompt, _last_execute_code_stdout(state), state=state
+                                state.prompt, _last_execute_code_stdout(state), state=state,
+                                document_text=_attached_pdf_text(state),
                             ),
                             temperature=FILEGEN_STRUCTURED_TEMPERATURE,
                         )
@@ -1700,7 +1774,9 @@ def decide_next_step(state: TaskState) -> NextStep:
                 return NextStep(
                     action="call_qwen",
                     model=filegen_model,
-                    prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(state.prompt, stdout, state=state),
+                    prompt=FILEGEN_CONTENT_MARKER + _build_filegen_content_prompt(
+                        state.prompt, stdout, state=state, document_text=_attached_pdf_text(state)
+                    ),
                     temperature=LORA_TEMPERATURE if filegen_model == LORA_ADAPTER else FILEGEN_STRUCTURED_TEMPERATURE,
                 )
             reasoning_prompt = _build_code_result_prompt(state.prompt, last.observation or {})

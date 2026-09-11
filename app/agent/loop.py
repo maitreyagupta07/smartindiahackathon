@@ -20,6 +20,7 @@ logic lives here), persistent step/observation history, and hard max-step
 protection so a planner bug can never hang a request indefinitely.
 """
 from ..router.router import route_task
+from ..router.classifier import classify as classify_prompt
 from .state import TaskState
 from .planner import (
     decide_next_step,
@@ -30,6 +31,12 @@ from .planner import (
 )
 from ..inference.client import call_inference
 from ..tools.facade import execute_code, search_docs, generate_file, scan_document, generate_image, forecast_timeseries
+from ..tools.pdf_extract import (
+    is_pdf as is_pdf_mime,
+    has_no_text_layer,
+    render_first_page_png_base64,
+    extract_text_from_pdf,
+)
 from ..router.model_registry import IMAGE_MODEL, TIMESERIES_MODEL
 from ..schemas.task import ExecuteTaskRequest, ExecuteTaskResponse, TaskResult
 
@@ -96,9 +103,42 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
         f"has_file={bool(req.file_base64)} chat_id={getattr(req, 'chat_id', None)!r}"
     )
 
+    # Scanned/handwritten PDF support: an attached PDF with no real text
+    # layer (has_no_text_layer) is a genuinely scanned/photographed
+    # document, not an exported/typed one — direct extraction alone finds
+    # nothing, and Tesseract OCR (extract_text_from_pdf's fallback) is
+    # unreliable on handwriting. Rather than adding a second, parallel
+    # vision pathway, this reframes the request as the SAME kind of request
+    # an uploaded photograph already is: render the page to an image and
+    # let the existing vision (Moondream) + reasoning (Qwen) chain in
+    # planner.py handle it exactly as it already does for any other image,
+    # with whatever OCR text this module still found passed along as extra
+    # grounding (see state.pdf_ocr_text, consumed in planner._build_reasoning_prompt).
+    #
+    # Scoped to ONLY the plain-question fallback case (classify() on the
+    # prompt text alone would land on "text-generation", i.e. no stronger
+    # signal like doc-search/code-execution/document-generation) so a
+    # document-generation request ("turn this scanned form into a Word
+    # doc") is untouched here and keeps producing an actual file — it still
+    # gets whatever text extract_text_from_pdf found, via
+    # planner._ground_prompt_in_pdf_text, just without this vision detour.
+    if req.file_base64 and is_pdf_mime(req.file_mime_type) and has_no_text_layer(req.file_base64):
+        prompt_only_type = classify_prompt(req.prompt, None).task_type
+        if prompt_only_type == "text-generation":
+            page_image = render_first_page_png_base64(req.file_base64)
+            if page_image:
+                print(
+                    f"[LOOP] task_id={req.task_id} scanned/handwritten PDF detected "
+                    f"(no selectable text layer) -> routing the rendered first page "
+                    f"through the vision model instead of the bare text prompt"
+                )
+                state.pdf_ocr_text = extract_text_from_pdf(req.file_base64) or None
+                state.file_base64 = page_image
+                state.file_mime_type = "image/png"
+
     try:
         task_type, first_model, needs_reasoning = await route_task(
-            req.prompt, req.file_mime_type, getattr(req, "chat_id", None)
+            req.prompt, state.file_mime_type, getattr(req, "chat_id", None)
         )
         state.task_type = task_type
         state.needs_reasoning = needs_reasoning

@@ -88,6 +88,57 @@ def _extract_via_ocr(pdf_bytes: bytes) -> str:
     return "\n\n".join(text_parts).strip()
 
 
+def has_no_text_layer(file_base64: str) -> bool:
+    """
+    True when the PDF has no real embedded/selectable text layer at all —
+    i.e. it's a genuinely scanned/photographed document rather than an
+    exported/typed one. Checks ONLY direct extraction (pdfplumber), never
+    OCR — OCR's own success/quality must never affect this decision: a
+    scanned page tesseract happens to read reasonably well is still a
+    scanned page that may ALSO contain handwriting OCR missed, so the
+    caller (app/agent/loop.py) still routes it through the local vision
+    model in addition to whatever OCR text this module extracts.
+    """
+    try:
+        pdf_bytes = base64.b64decode(file_base64)
+        direct_text = _extract_direct_text(pdf_bytes)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[PDF_EXTRACT] has_no_text_layer: could not check direct text ({exc}) -> treating as scanned")
+        return True
+    return len(direct_text) < _MIN_TEXT_LENGTH_TO_SKIP_OCR
+
+
+def render_first_page_png_base64(file_base64: str) -> str | None:
+    """
+    Renders a scanned PDF's first page to a PNG and returns it as base64 —
+    the same per-page rendering _extract_via_ocr already does, factored out
+    so the agent loop can also hand this image to the local vision model
+    (Moondream) when the PDF has no real text layer (see has_no_text_layer)
+    and OCR alone can't be trusted to have caught everything — most notably
+    handwritten notes/measurements/remarks, which Tesseract (tuned for
+    printed text) reads unreliably. Only the first page: Moondream takes one
+    image per call, and a multi-page vision pass is outside this fix's
+    scope (see the caller's own docstring for that limitation). Returns
+    None if PyMuPDF isn't installed or the PDF can't be opened/rendered —
+    the caller then falls back to whatever text extract_text_from_pdf found.
+    """
+    if fitz is None:
+        return None
+    try:
+        pdf_bytes = base64.b64decode(file_base64)
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if doc.page_count == 0:
+            doc.close()
+            return None
+        pix = doc[0].get_pixmap(dpi=200)
+        png_bytes = pix.tobytes("png")
+        doc.close()
+        return base64.b64encode(png_bytes).decode("ascii")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[PDF_EXTRACT] could not render first page to an image: {exc}")
+        return None
+
+
 def extract_text_from_pdf(file_base64: str) -> str:
     """
     Returns the best-effort plain text content of the uploaded PDF —

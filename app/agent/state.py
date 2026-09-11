@@ -53,6 +53,14 @@ class TaskState:
     # own uploads by docsearch.search_all).
     user_id: str | None = None
 
+    # Set by run_agent_loop only when an attached PDF had no real text layer
+    # (a scanned/photographed document — see pdf_extract.has_no_text_layer)
+    # and was therefore routed through the vision model instead: whatever
+    # direct/OCR text pdf_extract.py still managed to pull out of it (often
+    # partial for handwriting), so the post-vision Qwen reasoning step can
+    # combine it with Moondream's own observation instead of losing it.
+    pdf_ocr_text: str | None = None
+
     # last model actually called — kept for the contract's top-level
     # `model_used` field (§2.4). For multi-model chains this is the model
     # of the FINAL step, since that's what actually produced the answer.
