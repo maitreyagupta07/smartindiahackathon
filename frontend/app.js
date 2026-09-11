@@ -36,8 +36,8 @@ const Theme = {
    - Served by a separate static server (Live Server / python -m http.server
      on :5500, file://, etc): target the backend on :8000 explicitly; the
      backend's CORSMiddleware allow-lists :5500.
-   Override for anything else with window.SOVEREIGN_API_BASE. */
-const API_BASE = window.SOVEREIGN_API_BASE ?? (() => {
+   Override for anything else with window.ERSA_API_BASE. */
+const API_BASE = window.ERSA_API_BASE ?? window.SOVEREIGN_API_BASE ?? (() => {
   if (location.port === '8000') return '';  // served by the backend itself -> same-origin
   // Force 127.0.0.1, never the literal "localhost": on Windows "localhost"
   // resolves to IPv6 ::1 first, but uvicorn (host="0.0.0.0") only listens on
@@ -202,7 +202,7 @@ const Api = {
     return body;
   },
 
-  /* ---- Network-security monitor (Person E) — admin Security & Sovereignty ---- */
+  /* ---- Network-security monitor (Person E) — admin Security & Isolation ---- */
 
   /** Current/global sweep of this machine's own outbound TCP connections. */
   async getNetworkStatus() {
@@ -220,7 +220,7 @@ const Api = {
     return body;
   },
 
-  /* ---- Egress firewall (enforcement layer) — admin Security & Sovereignty ---- */
+  /* ---- Egress firewall (enforcement layer) — admin Security & Isolation ---- */
 
   /** Current state of the in-process egress firewall: enforcing flag,
    *  allow-list, and the live log of blocked off-LAN connection attempts. */
@@ -236,6 +236,21 @@ const Api = {
     const res = await fetch(`${API_BASE}/api/egress-firewall/self-test`, { method: 'POST' });
     const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
     if (!res.ok) throw new Error(body.error || `egress self-test failed (${res.status})`);
+    return body;
+  },
+
+  /** POST /api/auth/admin-login — the real backend half of the "Switch to
+   *  Admin" passcode gate (see AdminAuth.loginWithPasscode). Sends the
+   *  CURRENT bearer token (if any) so an already-signed-in user gets
+   *  promoted in place instead of being swapped to a different identity. */
+  async adminLogin(passcode) {
+    const res = await fetch(`${API_BASE}/api/auth/admin-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ passcode }),
+    });
+    const body = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    if (!res.ok) throw new Error(body.detail || body.error || `admin sign-in failed (${res.status})`);
     return body;
   },
 
@@ -381,7 +396,7 @@ const Greetings = {
       `Good evening, ${n}.`,
     ],
     lateNight: (n) => [
-      `Coffee and Claude time, ${n}?`,
+      `Coffee and ERSA time, ${n}?`,
       `Still up, ${n}? Let's make it count.`,
       `Late one tonight, ${n}.`,
     ],
@@ -508,28 +523,30 @@ function routeForModel(modelUsed) {
 }
 
 /**
- * AdminAuth — a lightweight, CLIENT-SIDE-ONLY access gate for the Admin
- * shell. The locked backend contract (MASTER_BUILD_GUIDE.md §2.3) has no
- * login/session/auth endpoint, so this cannot be — and does not claim to
- * be — real authenticated security. It exists purely so the Admin surface
- * isn't one click away from the User workbench: a passcode is set on first
- * use and stored in this browser's localStorage, then required (session-
- * scoped) on every subsequent visit to the Admin shell. This is a UI
- * access gate, not a substitute for real server-side authentication —
- * if/when the contract adds a real auth endpoint, this module is the only
- * place that needs to change.
+ * AdminAuth — the "Switch to Admin" gate, backed by the REAL backend
+ * endpoint POST /api/auth/admin-login (app/api/auth.py). Entering the
+ * shared admin passcode (config.json's "admin_passcode", default "1230#")
+ * promotes the caller to a genuine is_admin=1 account and returns a real
+ * bearer token — the same kind UserAuth uses — so every admin-only
+ * endpoint (audit log, network/isolation status) actually authorizes.
+ *
+ * Deliberately a single SHARED passcode, not per-account security: this is
+ * a single-operator, air-gapped, on-premise deployment, so the passcode
+ * only exists to keep the Admin console from being one click away from the
+ * User workbench, not to gate between untrusted parties (see
+ * ADMIN_PASSCODE's docstring in app/storage/config.py).
  */
 const AdminAuth = {
-  PASSCODE_KEY: 'sovereign-admin-passcode',
   SESSION_KEY: 'sovereign-admin-session',
-  DEFAULT_PASSCODE: '1230#',
-  hasPasscode() { return !!localStorage.getItem(this.PASSCODE_KEY); },
-  setPasscode(p) { localStorage.setItem(this.PASSCODE_KEY, p); },
-  checkPasscode(p) { return p && p === localStorage.getItem(this.PASSCODE_KEY); },
-  /** Seeds the default admin passcode on first use, so Admin access works
-   *  out of the box with a known passcode instead of demanding first-run
-   *  setup. Call once, before checking hasPasscode()/isFirstRun. */
-  ensureDefaultPasscode() { if (!this.hasPasscode()) this.setPasscode(this.DEFAULT_PASSCODE); },
+  /** Sends the passcode to the backend; on success stores the returned
+   *  bearer token and starts the admin session for this tab. Throws with a
+   *  human-readable message on an incorrect passcode or a network error. */
+  async loginWithPasscode(passcode) {
+    const body = await Api.adminLogin(passcode);
+    AuthToken.set(body.token);
+    this.startSession();
+    return body;
+  },
   isSessionActive() { return sessionStorage.getItem(this.SESSION_KEY) === 'true'; },
   startSession() { sessionStorage.setItem(this.SESSION_KEY, 'true'); },
   endSession() {

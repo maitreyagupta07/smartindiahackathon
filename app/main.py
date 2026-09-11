@@ -1,5 +1,5 @@
 """
-Sovereign On-Premise Agentic AI Workbench — single-node deployment.
+ERSA — On-Premise Agentic AI Workbench — single-node deployment.
 
 The ONE FastAPI app, the ONE LAN-facing network listener (§2.2/§2.3 of the
 original multi-service contract, now collapsed into a single process per
@@ -68,7 +68,7 @@ print(
     f"{'blocked' if _ef_status['enforcing'] else 'NOT blocked'}"
 )
 
-app = FastAPI(title="Sovereign On-Premise Agentic AI Workbench")
+app = FastAPI(title="ERSA — On-Premise Agentic AI Workbench")
 install_error_handlers(app)
 
 # The real deployment always serves the frontend from this same app (same

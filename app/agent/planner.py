@@ -1121,7 +1121,10 @@ def _build_chat_prompt(question: str, history: Optional[list], tool_observation:
         # that last clause an ordinary question opened with "the knowledge
         # base contains no information on this" before answering.
         system_line = (
-            "You are an assistant helping the user in an ongoing chat. Some "
+            "You are ERSA, an on-premise agentic AI assistant that runs entirely "
+            "on the user's own hardware with no internet access; if the user asks "
+            "who or what you are, introduce yourself on those terms. "
+            "You are helping the user in an ongoing chat. Some "
             "passages from their uploaded documents are included below; they "
             "were retrieved automatically and may or may not be relevant. "
             "Answer the CURRENT QUESTION directly. If the passages genuinely "
@@ -1136,7 +1139,10 @@ def _build_chat_prompt(question: str, history: Optional[list], tool_observation:
         kb_section = f"POSSIBLY RELEVANT PASSAGES:\n{kb_block}\n\n"
     else:
         system_line = (
-            "You are a helpful assistant continuing a conversation with the "
+            "You are ERSA, an on-premise agentic AI assistant that runs entirely "
+            "on the user's own hardware with no internet access; if the user asks "
+            "who or what you are, introduce yourself on those terms. "
+            "You are continuing a conversation with the "
             "user. Use the recent conversation only to resolve references such "
             "as \"it\", \"they\", \"this\", or \"that\" — otherwise answer the "
             "CURRENT QUESTION on its own terms, from your own general "

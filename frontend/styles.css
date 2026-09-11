@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-/* ===== Design tokens (Sovereign AI Workbench) ===== */
+/* ===== Design tokens (ERSA — AI Workbench) ===== */
 :root {
   --canvas-bg: #0a0908;
   --base-surface: #111010;
@@ -384,7 +384,7 @@ input, select { font-family: inherit; }
   display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font-size: 10px;
   color: var(--text-muted); font-family: 'JetBrains Mono', monospace; position: relative; z-index: 5;
 }
-.graph-footer .sovereign { color: var(--success); display: flex; align-items: center; gap: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+.graph-footer .isolated { color: var(--success); display: flex; align-items: center; gap: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
 
 /* Shared status pill (used by the node-inspector popover) */
 .status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid; flex-shrink: 0; }
@@ -518,7 +518,7 @@ tbody td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 .capability-badge { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--elevated-surface); border: 1px solid var(--border-subtle); border-radius: 999px; font-size: 12px; color: var(--text-secondary); }
 .capability-badge iconify-icon { color: var(--success); }
 
-/* Network Monitor (Person E) status banner — Security & Sovereignty tab. */
+/* Network Monitor status banner — Security & Isolation tab. */
 .netmon-status {
   display: flex; align-items: center; gap: 10px;
   padding: 12px 16px; border-radius: 10px;
@@ -616,6 +616,8 @@ tbody td.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
 .idle-view { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; z-index: 5; padding: 0 24px; }
 .idle-inner { max-width: 640px; width: 100%; text-align: center; }
 .idle-inner .greet { font-size: 13.5px; color: var(--text-secondary); margin-bottom: 6px; }
+.idle-inner .idle-intro { font-size: 12.5px; line-height: 1.55; color: var(--text-muted); max-width: 520px; margin: 0 auto 18px; }
+.idle-inner .idle-intro strong { color: var(--text-secondary); font-weight: 600; }
 .idle-inner h1 { font-size: 27px; font-weight: 600; margin: 0 0 32px; letter-spacing: -0.01em; }
 .composer-bar--centered { box-shadow: 0 8px 32px var(--shadow-lg); }
 

@@ -35,7 +35,7 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from ..storage.config import ADMIN_USER_IDS, REPO_ROOT
+from ..storage.config import ADMIN_PASSCODE, ADMIN_USER_IDS, REPO_ROOT
 
 router = APIRouter()
 
@@ -178,6 +178,88 @@ async def login(req: LoginRequest):
         "nickname": nickname or user_id,
         "is_admin": bool(is_admin),
         "token": _issue_token(user_id),
+    }
+
+
+_RESERVED_ADMIN_USER_ID = "ersa-admin"
+
+
+class AdminLoginRequest(BaseModel):
+    passcode: str
+
+
+def _ensure_reserved_admin_account() -> None:
+    """Auto-provisions a passcode-only admin identity for whoever opens the
+    Admin gate with no user session at all (e.g. admin-login.html visited
+    directly, no prior sign-in in this browser). Its password hash is a
+    random value nobody is ever told — this account is reachable only
+    through /api/auth/admin-login's passcode check, never /api/auth/login."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM accounts WHERE user_id = ?", (_RESERVED_ADMIN_USER_ID,)
+        ).fetchone()
+        if row is None:
+            salt = os.urandom(_SALT_BYTES)
+            pw_hash = _hash_password(secrets.token_urlsafe(24), salt)
+            conn.execute(
+                "INSERT INTO accounts (user_id, nickname, salt, password_hash, is_admin, created_at) "
+                "VALUES (?, ?, ?, ?, 1, datetime('now'))",
+                (_RESERVED_ADMIN_USER_ID, "Admin", salt, pw_hash),
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
+@router.post("/api/auth/admin-login")
+async def admin_login(req: AdminLoginRequest, authorization: Optional[str] = Header(default=None)):
+    """
+    The demo-grade "Switch to Admin" gate behind frontend/admin-login.html's
+    AdminAuth module. Checks the caller's passcode against the shared
+    ADMIN_PASSCODE (config.json's "admin_passcode", default "1230#") —
+    deliberately a single shared secret, not per-account security: see
+    ADMIN_PASSCODE's docstring in app/storage/config.py for why that is an
+    acceptable trade for this single-operator, air-gapped deployment.
+
+    On a correct passcode, two outcomes depending on whether the caller was
+    already signed in as a real user (a valid bearer token was sent):
+      - Signed in: that SAME account is promoted to is_admin=1 and reused
+        as-is — no new token, no identity swap, so the rest of this browser
+        tab (Knowledge Base, task history, chats — all keyed by that same
+        user_id) keeps working unchanged when the operator switches back to
+        the User Workbench.
+      - Not signed in (admin-login.html opened directly, no prior session):
+        the reserved "ersa-admin" account is auto-provisioned and signed
+        into.
+    """
+    if not hmac.compare_digest(req.passcode or "", ADMIN_PASSCODE):
+        raise HTTPException(status_code=401, detail="incorrect passcode")
+
+    existing_user_id = _resolve(_bearer(authorization))
+    if existing_user_id:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            conn.execute("UPDATE accounts SET is_admin = 1 WHERE user_id = ?", (existing_user_id,))
+            conn.commit()
+            row = conn.execute(
+                "SELECT nickname FROM accounts WHERE user_id = ?", (existing_user_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return {
+            "user_id": existing_user_id,
+            "nickname": (row[0] if row else None) or existing_user_id,
+            "is_admin": True,
+            "token": _bearer(authorization),
+        }
+
+    _ensure_reserved_admin_account()
+    return {
+        "user_id": _RESERVED_ADMIN_USER_ID,
+        "nickname": "Admin",
+        "is_admin": True,
+        "token": _issue_token(_RESERVED_ADMIN_USER_ID),
     }
 
 

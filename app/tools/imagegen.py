@@ -51,19 +51,49 @@ def _get_pipeline():
             "`pip install torch diffusers` in this project's venv."
         ) from exc
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    # Always the fp16 weights, on CPU or GPU — HF's fp16 safetensors load
-    # and run fine on CPU too (slower, but numerically fine for images).
-    # `variant="fp16"` is what actually matters here: without it, diffusers
-    # loads the full-precision (fp32) files by DEFAULT regardless of
-    # torch_dtype, then casts down — silently doubling load time and disk
-    # I/O, and requiring the fp32 files to exist on disk at all (they don't
-    # — deleted; extra_models/sd-turbo only carries the fp16 variant now).
-    dtype = torch.float16
-    print(f"[IMAGEGEN] loading SD Turbo (fp16) from {_MODEL_DIR} onto device={device}")
-    _pipe = AutoPipelineForText2Image.from_pretrained(
+    # This model MUST run on the GPU whenever one is visible. A CPU fallback
+    # still works but is ~15-30x slower, so it is a loud warning, never a
+    # silent downgrade.
+    if torch.cuda.is_available():
+        device = "cuda"
+        print(
+            f"[IMAGEGEN] CUDA OK — {torch.cuda.get_device_name(0)} "
+            f"(torch {torch.__version__}); SD Turbo will run on GPU"
+        )
+    else:
+        device = "cpu"
+        print(
+            "[IMAGEGEN] WARNING: torch.cuda.is_available() is False — SD Turbo "
+            "will run on CPU (slow). Install a CUDA build of torch to fix."
+        )
+
+    # Always the fp16 weights. `variant="fp16"` is what actually matters:
+    # without it, diffusers loads the full-precision (fp32) files by DEFAULT
+    # regardless of torch_dtype, then casts down — doubling load time/IO and
+    # needing fp32 files that aren't on disk. On CPU, fall back to fp32 math
+    # (fp16 matmul is unsupported on many CPUs) while still loading fp16 weights.
+    dtype = torch.float16 if device == "cuda" else torch.float32
+    print(f"[IMAGEGEN] loading SD Turbo from {_MODEL_DIR} onto device={device} dtype={dtype}")
+    pipe = AutoPipelineForText2Image.from_pretrained(
         str(_MODEL_DIR), torch_dtype=dtype, variant="fp16", safety_checker=None,
     ).to(device)
+
+    if device == "cuda":
+        # ERSA shares an 8 GB card with Ollama's resident text+vision models.
+        # These slicing options cut SD Turbo's peak VRAM enough that a
+        # generation can't OOM against those — negligible cost at 1 step.
+        try:
+            pipe.enable_attention_slicing()
+            pipe.enable_vae_slicing()
+        except Exception as exc:  # noqa: BLE001 - optional, never fatal
+            print(f"[IMAGEGEN] (attention/vae slicing unavailable: {exc})")
+        try:
+            pipe.set_progress_bar_config(disable=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    _pipe = pipe
+    _pipe._ersa_device = device  # noqa: SLF001 - read back in generate_image for logging
     return _pipe
 
 
@@ -79,13 +109,22 @@ def generate_image(prompt: str, num_inference_steps: int = 1) -> dict:
     enough for a live demo even on modest hardware.
     """
     pipe = _get_pipeline()
-    print(f"[IMAGEGEN] generating image prompt={prompt!r} steps={num_inference_steps}")
+    device = getattr(pipe, "_ersa_device", "cpu")
+    print(f"[IMAGEGEN] generating image on {device} prompt={prompt!r} steps={num_inference_steps}")
     image = pipe(prompt=prompt, num_inference_steps=num_inference_steps, guidance_scale=0.0).images[0]
 
     file_name = f"{uuid.uuid4().hex[:8]}-generated-image.png"
     out_path = FILES_DIR / file_name
     image.save(out_path)
     print(f"[IMAGEGEN] saved -> {out_path}")
+
+    # Hand the VRAM back so the next Ollama call / forecast isn't squeezed.
+    if device == "cuda":
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:  # noqa: BLE001
+            pass
 
     return {"file_url": f"/files/{file_name}", "file_name": file_name}
 

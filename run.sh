@@ -33,7 +33,26 @@ VENV_BIN=".venv/bin"
 
 PORT="$("$PY" -c "import json; print(json.load(open('config.json'))['ports']['backend'])" 2>/dev/null || echo 8000)"
 
-echo "=== Sovereign On-Premise Agentic AI Workbench ==="
+echo "=== ERSA — On-Premise Agentic AI Workbench ==="
+
+# --- Locate Ollama even if it isn't on PATH in this shell -------------------
+# The Windows box uses the portable build under %LOCALAPPDATA%. Git-Bash
+# started from Explorer / the IDE often doesn't inherit that on PATH, which
+# is why `ollama serve` used to silently do nothing.
+if ! command -v ollama >/dev/null 2>&1; then
+    for cand in \
+        "$LOCALAPPDATA/Programs/OllamaPortable" \
+        "$LOCALAPPDATA/Programs/Ollama" \
+        "$HOME/AppData/Local/Programs/OllamaPortable" \
+        "$HOME/AppData/Local/Programs/Ollama" \
+        "/c/Program Files/Ollama"; do
+        if [ -x "$cand/ollama" ] || [ -x "$cand/ollama.exe" ]; then
+            PATH="$cand:$PATH"
+            echo "[ok] Found Ollama at $cand (added to PATH for this run)"
+            break
+        fi
+    done
+fi
 
 # --- Ollama: separate local process, bound to localhost only ---
 #
@@ -75,12 +94,63 @@ else
     fi
 fi
 
-# --- Docker: required for the code-execution sandbox ---
-if docker info > /dev/null 2>&1; then
+# --- Ollama models: make sure the ones config.json references are present ---
+# A first run on a fresh box otherwise 500s the first real request with
+# "model not found". Pulls are no-ops when the model is already local.
+if ollama_up && command -v ollama >/dev/null 2>&1; then
+    NEED_MODELS="$("$PY" -c "import json,sys; m=json.load(open('config.json'))['models']; print(' '.join(dict.fromkeys([m.get('text_model'),m.get('vision_model')])))" 2>/dev/null || echo "qwen3:1.7b moondream")"
+    HAVE="$(ollama list 2>/dev/null || true)"
+    for M in $NEED_MODELS; do
+        [ -n "$M" ] || continue
+        if printf '%s\n' "$HAVE" | grep -q "^${M%%:*}"; then
+            echo "[ok] Ollama model present: $M"
+        else
+            echo "[..] Pulling Ollama model: $M (first run only)..."
+            ollama pull "$M" || echo "[!!] Could not pull $M — model requests for it will fail."
+        fi
+    done
+    # The approval-note LoRA is a local Modelfile, not a registry pull.
+    LORA_NAME="$("$PY" -c "import json;print(json.load(open('config.json'))['models'].get('lora_adapter') or '')" 2>/dev/null || echo "approval-note-lora")"
+    if [ -n "$LORA_NAME" ] && ! printf '%s\n' "$HAVE" | grep -q "^${LORA_NAME}"; then
+        if [ -f "inference/lora/Modelfile.approval-note-lora" ]; then
+            echo "[..] Registering LoRA model '$LORA_NAME' from inference/lora/Modelfile.approval-note-lora ..."
+            ( cd inference/lora && ollama create "$LORA_NAME" -f Modelfile.approval-note-lora ) \
+                || echo "[!!] Could not register $LORA_NAME — approval-note generation will fall back to the base text model."
+        fi
+    fi
+fi
+
+# --- Docker: required for the code-execution sandbox -----------------------
+docker_up() { docker info > /dev/null 2>&1; }
+
+if docker_up; then
     echo "[ok] Docker reachable (code-execution sandbox available)"
 else
-    echo "[!!] Docker is not reachable — code-execution tasks will fail."
-    echo "     Install/start Docker, or code-execution requests will error out cleanly."
+    if [ "$IS_WINDOWS" = "1" ]; then
+        echo "[..] Docker not reachable — trying to start Docker Desktop..."
+        for dd in \
+            "/c/Program Files/Docker/Docker/Docker Desktop.exe" \
+            "$LOCALAPPDATA/Docker/Docker Desktop.exe"; do
+            [ -f "$dd" ] && { "$dd" >/dev/null 2>&1 & break; }
+        done
+        for _ in $(seq 1 60); do
+            docker_up && break
+            sleep 2
+        done
+    fi
+    if docker_up; then
+        echo "[ok] Docker reachable (code-execution sandbox available)"
+    else
+        echo "[!!] Docker is NOT reachable — code-execution tasks will error out cleanly."
+        echo "     Start Docker Desktop manually, then code-execution will work without restarting ERSA."
+    fi
+fi
+
+# Pre-pull the sandbox image so the very first code-execution request isn't
+# slowed (or failed on a flaky moment) by an on-the-spot image pull.
+if docker_up && ! docker image inspect python:3.11-slim >/dev/null 2>&1; then
+    echo "[..] Pulling sandbox image python:3.11-slim (first run only)..."
+    docker pull python:3.11-slim || echo "[!!] Could not pre-pull python:3.11-slim — first code task may be slow."
 fi
 
 # --- Python deps ---
@@ -88,6 +158,36 @@ if [ ! -d ".venv" ]; then
     echo "[..] Creating .venv and installing dependencies (first run only)..."
     "$PY" -m venv .venv
     "./$VENV_BIN/pip" install -q -r requirements.txt
+fi
+
+# --- GPU / CUDA preflight -------------------------------------------------
+# SD-Turbo (image generation) and MOMENT (forecasting) run through PyTorch,
+# which only uses the GPU when a CUDA-enabled torch build is installed. A
+# CPU-only wheel makes those two models silently ~10-30x slower. Report the
+# real state loudly instead of finding out mid-demo.
+GPU_REPORT="$("./$VENV_BIN/python" - <<'PY' 2>/dev/null || true
+try:
+    import torch
+    if torch.cuda.is_available():
+        print(f"[ok] PyTorch CUDA OK - {torch.cuda.get_device_name(0)} "
+              f"(torch {torch.__version__}); SD-Turbo + MOMENT will run on GPU")
+    else:
+        print(f"[!!] PyTorch is CPU-ONLY (torch {torch.__version__}). SD-Turbo and MOMENT "
+              f"will run on CPU (slow). Reinstall a CUDA build, e.g.:\n"
+              f"     ./.venv/Scripts/pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cu121")
+except Exception as e:
+    print(f"[!!] Could not check PyTorch/CUDA: {e}")
+PY
+)"
+echo "$GPU_REPORT"
+
+# Ollama uses the GPU on its own when one is visible; surface which.
+if ollama_up; then
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+        echo "[ok] NVIDIA GPU visible to the host — Ollama will offload qwen3 + moondream to it"
+    else
+        echo "[!!] nvidia-smi not available — Ollama may be running models on CPU"
+    fi
 fi
 
 # hostname -I is Linux-only; Windows has no equivalent one-liner, so fall

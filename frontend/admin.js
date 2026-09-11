@@ -1,4 +1,4 @@
-/* Admin — Overview + Security & Sovereignty. Reads ONLY GET /api/audit-log (§2.3).
+/* Admin — Overview + Security & Isolation. Reads ONLY GET /api/audit-log (§2.3).
    That endpoint returns {task_id, user_id, task_type, model_used, timestamp, file_uploaded}
    per entry — there is no status/success field in it, so this view never fabricates a
    success rate or a status column; it only shows what the real data actually carries. */
@@ -99,7 +99,7 @@ function renderUsers(entries) {
   `).join('');
 }
 
-/* Live Client Connections & Token Usage (Security & Sovereignty tab) — real
+/* Live Client Connections & Token Usage (Security & Isolation tab) — real
    data straight from the audit log: the actual source IP FastAPI recorded
    for each request (app/api/tasks.py's request.client.host, not a value the
    browser sent), and real token counts from Ollama's own response
@@ -310,24 +310,27 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-async function loadAuditLog() {
+async function loadAuditLog(opts = {}) {
+  const quiet = opts.quiet === true;  // used by the Security & Isolation live poll — no loading bar, no toasts
   const loadingBar = document.getElementById('audit-loading');
-  loadingBar.classList.add('show');
+  if (!quiet && loadingBar) loadingBar.classList.add('show');
   try {
     const live = await Api.probe();
     document.getElementById('admin-demo-badge').hidden = live;
     if (live) {
       const data = await Api.getAuditLog();
       AUDIT_ENTRIES = data.entries || [];
-    } else {
+    } else if (!quiet) {
       AUDIT_ENTRIES = demoAuditEntries();
       toast('Backend not detected — showing illustrative demo audit data.');
     }
   } catch (err) {
-    toast(`Couldn't load audit log: ${err.message}`, true);
-    AUDIT_ENTRIES = [];
+    if (!quiet) {
+      toast(`Couldn't load audit log: ${err.message}`, true);
+      AUDIT_ENTRIES = [];
+    }
   } finally {
-    loadingBar.classList.remove('show');
+    if (!quiet && loadingBar) loadingBar.classList.remove('show');
   }
   populateTypeFilter(AUDIT_ENTRIES);
   renderStats(AUDIT_ENTRIES);
@@ -375,6 +378,11 @@ function initTabs() {
     document.getElementById('admin-page-title').textContent = matched ? matched.textContent.trim() : 'Overview';
     const scroller = document.querySelector('.conversation-scroll');
     if (scroller) scroller.scrollTop = 0;
+    // Only run the 5s Security & Isolation refresh loop while that tab is open.
+    if (typeof IsolationLive !== 'undefined') {
+      if (tabId === 'sovereignty') IsolationLive.start();
+      else IsolationLive.stop();
+    }
   }
   // Delegate to any in-page link that points at a known tab hash (sidebar nav
   // items, "View all →", the compliance view's cross-link, etc.) so they all
@@ -431,7 +439,7 @@ function initKnowledgeBase() {
   loadKnowledgeBase();
 }
 
-/* Egress Firewall — Security & Sovereignty tab. The ENFORCEMENT layer:
+/* Egress Firewall — Security & Isolation tab. The ENFORCEMENT layer:
    calls GET /api/egress-firewall for live state + the blocked-attempt log,
    and POST /api/egress-firewall/self-test to actively prove public
    endpoints are unreachable. Distinct from NetworkMonitor below, which is
@@ -547,7 +555,7 @@ const EgressFirewall = {
   },
 };
 
-/* Network Monitor (Person E) — Security & Sovereignty tab. Calls the app's
+/* Network Monitor (Person E) — Security & Isolation tab. Calls the app's
    own /api/network-status endpoint (a live psutil sweep of THIS machine's
    established TCP connections, classified LOCAL / LAN_CLIENT / EXTERNAL /
    VIOLATION). Evidence wording only ("N external connections observed"),
@@ -649,16 +657,91 @@ const NetworkMonitor = {
     }
   },
 
+  /* Live per-task table: the most recent audit-log task_ids, each with its
+     own network-monitor record from GET /api/network-status/{task_id}.
+     This is what makes "submit a task as a user, switch to admin, see that
+     task_id and its isolation verdict" work with no manual paste. */
+  async loadRecent() {
+    const tbody = document.getElementById('netmon-recent-tbody');
+    const empty = document.getElementById('netmon-recent-empty');
+    if (!tbody) return;
+    let entries = Array.isArray(AUDIT_ENTRIES) ? AUDIT_ENTRIES.slice() : [];
+    entries.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+    entries = entries.slice(0, 8);
+    if (entries.length === 0) {
+      tbody.innerHTML = '';
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (empty) empty.hidden = true;
+
+    const records = await Promise.all(entries.map(async (e) => {
+      try { return { e, rec: await Api.getTaskNetworkStatus(e.task_id) }; }
+      catch { return { e, rec: null }; }
+    }));
+
+    tbody.innerHTML = records.map(({ e, rec }) => {
+      let verdict, color, ext;
+      if (!rec) {
+        verdict = 'no record'; color = 'var(--text-muted)'; ext = '—';
+      } else {
+        ext = Number(rec.external_connections || 0);
+        const bad = rec.status === 'VIOLATIONS_DETECTED' || ext > 0;
+        if (rec.status === 'UNAVAILABLE') { verdict = 'UNAVAILABLE'; color = 'var(--text-muted)'; }
+        else if (bad) { verdict = 'VIOLATION'; color = 'var(--error)'; }
+        else { verdict = 'ISOLATED'; color = 'var(--success)'; }
+      }
+      const sampled = rec && rec.started_at
+        ? `${this._fmtTs(rec.started_at)} → ${this._fmtTs(rec.ended_at || rec.last_checked)}`
+        : this._fmtTs(e.timestamp);
+      return `<tr>
+        <td class="mono" title="${escapeHtml(String(e.task_id))}">${escapeHtml(String(e.task_id).slice(0, 12))}…</td>
+        <td>${escapeHtml(e.user_id || '—')}</td>
+        <td>${escapeHtml(e.task_type || '—')}</td>
+        <td class="mono" style="color:${color};font-weight:600">${escapeHtml(verdict)}</td>
+        <td class="num mono" style="color:${ext && ext !== '—' ? 'var(--error)' : 'inherit'}">${ext}</td>
+        <td class="num" style="font-size:10.5px;color:var(--text-muted)">${escapeHtml(sampled)}</td>
+      </tr>`;
+    }).join('');
+  },
+
   init() {
     const refresh = document.getElementById('netmon-refresh');
-    if (refresh) refresh.addEventListener('click', () => this.load());
+    if (refresh) refresh.addEventListener('click', () => { this.load(); this.loadRecent(); });
     const check = document.getElementById('netmon-task-check');
     if (check) check.addEventListener('click', () => this.checkTask());
     const input = document.getElementById('netmon-task-input');
     if (input) input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.checkTask(); });
     const sovNav = document.querySelector('.nav-item[data-tab="sovereignty"]');
-    if (sovNav) sovNav.addEventListener('click', () => this.load());
+    if (sovNav) sovNav.addEventListener('click', () => { this.load(); this.loadRecent(); });
     this.load();
+    this.loadRecent();
+  },
+};
+
+/* Security & Isolation tab — real-time refresh loop. While that tab is the
+   active one, re-poll the egress firewall, the live network sweep, the
+   audit log (for the per-task table + client/token stats), and each recent
+   task's network record every REFRESH_MS. Stops when another tab is shown
+   so it isn't polling in the background forever. */
+const IsolationLive = {
+  REFRESH_MS: 5000,
+  _timer: null,
+  async tick() {
+    await loadAuditLog({ quiet: true });   // refresh AUDIT_ENTRIES + the client/token panels
+    await Promise.all([
+      EgressFirewall.load(),
+      NetworkMonitor.load(),
+      NetworkMonitor.loadRecent(),
+    ]);
+  },
+  start() {
+    if (this._timer) return;
+    this.tick();
+    this._timer = setInterval(() => this.tick(), this.REFRESH_MS);
+  },
+  stop() {
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
   },
 };
 

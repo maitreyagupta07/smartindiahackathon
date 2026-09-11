@@ -24,3 +24,8 @@ extra_models/
 # publish every operator's hash and freeze the "first account is admin"
 # bootstrap at whatever the developer's machine happened to create.
 app/audit/accounts.sqlite3
+
+# Runtime audit DB — rewritten on every task; tracking it caused a merge
+# conflict on every git pull. Kept out of version control; each deployment
+# builds its own from init_db().
+app/audit/audit_log.sqlite3

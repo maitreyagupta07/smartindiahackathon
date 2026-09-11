@@ -132,3 +132,12 @@ EGRESS_FIREWALL = {
 ADMIN_USER_IDS = frozenset(
     str(u).strip() for u in (_RAW.get("admin_user_ids") or []) if str(u).strip()
 )
+
+# Shared demo-grade passcode for the Admin shell's "Switch to Admin" gate
+# (app/api/auth.py's /api/auth/admin-login, frontend/admin-login.html).
+# Entering it promotes the caller to is_admin — deliberately a single shared
+# secret, not per-account security: this is a single-operator, air-gapped,
+# on-premise deployment, so the passcode only exists to keep the Admin
+# console from being one click away from the User workbench, not to gate
+# between untrusted parties. Override via config.json's "admin_passcode".
+ADMIN_PASSCODE = str(_RAW.get("admin_passcode") or "1230#")

@@ -11,5 +11,5 @@ import tempfile
 
 # Must be set before app.api.auth is imported, since DB_PATH is read at
 # import time.
-_TMP_DB = os.path.join(tempfile.mkdtemp(prefix="sovereign-test-accounts-"), "accounts.sqlite3")
+_TMP_DB = os.path.join(tempfile.mkdtemp(prefix="ersa-test-accounts-"), "accounts.sqlite3")
 os.environ.setdefault("ACCOUNTS_DB_PATH", _TMP_DB)

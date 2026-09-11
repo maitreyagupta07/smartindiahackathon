@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sovereign AI Workbench</title>
-<link rel="stylesheet" href="styles.css?v=20260919">
+<title>ERSA — AI Workbench</title>
+<link rel="stylesheet" href="styles.css?v=20260920">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -14,7 +14,7 @@
   <aside class="sidebar">
     <div class="sidebar-brand">
       <div class="mark"><iconify-icon icon="lucide:shield-check"></iconify-icon></div>
-      <span class="name">Sovereign</span>
+      <span class="name">ERSA</span>
     </div>
     <a href="#" id="nav-new-task" class="sidebar-new-task">
       <iconify-icon icon="lucide:plus"></iconify-icon><span>New Chat</span>
@@ -112,6 +112,7 @@
     <div id="idle-view" class="idle-view">
       <div class="idle-inner">
         <div class="greet" id="idle-greet">Hi, Operator 👋</div>
+        <p class="idle-intro">I'm <strong>ERSA</strong> — your on-premise agentic AI workbench. Every model (text, vision, LoRA, image, forecasting) runs locally on this machine, and nothing you type, upload, or generate ever leaves the network.</p>
         <h1>What are we building today?</h1>
         <div class="template-bar" id="template-bar-idle" aria-label="Task templates"></div>
         <div class="file-preview-list" id="file-preview-idle"></div>
@@ -183,7 +184,7 @@
     <div class="graph-canvas custom-scroll" id="graph-canvas"></div>
     <footer class="graph-footer">
       <span class="mono" id="graph-footer-task">TASK: —</span>
-      <span class="sovereign"><iconify-icon icon="lucide:shield-check"></iconify-icon>System Sovereign</span>
+      <span class="isolated"><iconify-icon icon="lucide:shield-check"></iconify-icon>Air-Gapped · Offline</span>
     </footer>
 
     <!-- Contextual node inspector — a compact popover anchored to the
@@ -246,9 +247,9 @@
   </div>
 </div>
 
-<script src="app.js?v=20260919"></script>
+<script src="app.js?v=20260920"></script>
 <script>UserAuth.guard(); // redirects to login.html immediately if no active user session</script>
-<script src="user.js?v=20260919"></script>
+<script src="user.js?v=20260920"></script>
 <script>
   document.getElementById('sidebar-user-id').textContent = Store.USER_ID;
   document.getElementById('sidebar-user-name').textContent = UserAuth.nicknameFor(Store.USER_ID);

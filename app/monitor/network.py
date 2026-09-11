@@ -1,12 +1,23 @@
 """
 Person E's network monitor — adapted to the single-node architecture.
 
-Same idea as ``demo/network_monitor.py`` (a psutil sweep of THIS machine's
+Same idea as ``demo/network_monitor.py`` (a psutil sweep of THIS PROCESS's
 own live TCP connections, classified against a no-external-egress policy),
 re-expressed as a library the running FastAPI app can query on demand
 instead of a standalone 30-second CLI watch. Wireshark / Resource Monitor
 stay the independent, packet-level verification on Person A's laptop; this
 is only the app's own application-level self-report.
+
+Scoped to THIS PROCESS (``psutil.Process(os.getpid())``), matching exactly
+what the egress firewall (app/security/egress_firewall.py) enforces —
+earlier versions swept every socket on the whole machine
+(``psutil.net_connections``), which meant an unrelated browser tab, OS
+telemetry, or another app on the same laptop showed up here as a false
+"policy violation" even though the AI workload itself made no such call.
+That is a real difference: this file's job is to prove THIS APPLICATION is
+air-gapped, not to audit the whole machine — the egress firewall's own
+blocked-attempt log is the enforcement proof for exactly this process, and
+this sweep is now its honest, matching read-only witness.
 
 Per established remote endpoint, the classification kept from the CLI tool:
 
@@ -30,6 +41,7 @@ id and timestamps.
 """
 import asyncio
 import ipaddress
+import os
 from datetime import datetime, timezone
 
 try:  # psutil is already a dependency (see requirements.txt); guard anyway
@@ -89,17 +101,30 @@ def _unavailable(reason: str) -> dict:
 
 def sample() -> dict:
     """
-    One live sweep of this machine's ESTABLISHED TCP connections, classified
-    against the allow-policy. Cheap enough to call on every request; never
-    raises (a failure is reported as status "UNAVAILABLE" with a reason).
+    One live sweep of THIS PROCESS's ESTABLISHED TCP connections (the AI
+    workload itself — this FastAPI process, which is also the one the egress
+    firewall guards), classified against the allow-policy. Cheap enough to
+    call on every request; never raises (a failure is reported as status
+    "UNAVAILABLE" with a reason).
+
+    Deliberately process-scoped, not a whole-machine sweep: this same
+    Windows laptop also runs a browser, OS services, etc, and those sockets
+    have nothing to do with whether the AI workload is air-gapped. A
+    machine-wide sweep would show their ordinary internet traffic as a
+    "policy violation" here even though this application never made that
+    call — a false alarm that undermines the very claim this panel exists
+    to prove. Scoping to os.getpid() makes this an honest witness of the
+    same boundary the egress firewall enforces.
     """
     if psutil is None:
         return _unavailable("psutil is not installed on this host")
     try:
-        conns = psutil.net_connections(kind="inet")
+        this_process = psutil.Process(os.getpid())
+        get_conns = getattr(this_process, "net_connections", None) or this_process.connections
+        conns = get_conns(kind="inet")
     except (psutil.AccessDenied, PermissionError):
         return _unavailable(
-            "insufficient privileges to read the socket table on this host "
+            "insufficient privileges to read this process's socket table "
             "(on Windows this endpoint needs an elevated backend process)"
         )
     except Exception as exc:  # noqa: BLE001

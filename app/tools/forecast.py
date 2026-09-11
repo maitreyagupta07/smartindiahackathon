@@ -50,7 +50,20 @@ def _get_pipeline(horizon: int):
             "`pip install torch momentfm` in this project's venv."
         ) from exc
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # MOMENT must run on the GPU whenever one is visible. CPU still works but
+    # is a loud warning, never a silent downgrade.
+    if torch.cuda.is_available():
+        device = "cuda"
+        print(
+            f"[FORECAST] CUDA OK — {torch.cuda.get_device_name(0)} "
+            f"(torch {torch.__version__}); MOMENT-1-small will run on GPU"
+        )
+    else:
+        device = "cpu"
+        print(
+            "[FORECAST] WARNING: torch.cuda.is_available() is False — MOMENT-1-small "
+            "will run on CPU. Install a CUDA build of torch to fix."
+        )
     print(f"[FORECAST] loading MOMENT-1-small from {_MODEL_DIR} horizon={horizon} device={device}")
     model = MOMENTPipeline.from_pretrained(
         str(_MODEL_DIR),
@@ -119,6 +132,11 @@ def forecast_timeseries(data: list, horizon: int = 8) -> dict:
     with torch.no_grad():
         output = model(x_enc=x_enc)
     raw = output.forecast.reshape(-1).cpu().tolist()
+    if device == "cuda":
+        try:
+            torch.cuda.empty_cache()
+        except Exception:  # noqa: BLE001
+            pass
     # Invert the normalization so the forecast comes back in the user's own units.
     forecast = [v * std + mean for v in raw]
 

@@ -1,4 +1,4 @@
-# Sovereign On-Premise Agentic AI Workbench
+# ERSA — On-Premise Agentic AI Workbench
 
 Single-node deployment: one FastAPI app, one LAN-facing port (`:8000`).
 See `PERSON_A_NOTES.md` at the repo root for the full audit/rationale

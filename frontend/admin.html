@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sovereign AI Operations</title>
-<link rel="stylesheet" href="styles.css?v=20260919">
+<title>ERSA — AI Operations</title>
+<link rel="stylesheet" href="styles.css?v=20260920">
 <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
 </head>
 <body>
@@ -13,7 +13,7 @@
   <aside class="sidebar">
     <div class="sidebar-brand">
       <div class="mark"><iconify-icon icon="lucide:terminal"></iconify-icon></div>
-      <span class="name" style="font-size:11px;letter-spacing:.06em">AI Operations</span>
+      <span class="name" style="font-size:11px;letter-spacing:.06em">ERSA · Operations</span>
     </div>
     <nav class="sidebar-nav custom-scroll">
       <div class="sidebar-section-label">System Management</div>
@@ -25,7 +25,7 @@
       <a href="#knowledge" class="nav-item" data-tab="knowledge"><iconify-icon icon="lucide:book-marked"></iconify-icon><span>Knowledge Base</span></a>
       <div class="sidebar-section-label">Compliance &amp; Security</div>
       <a href="#audit" class="nav-item" data-tab="audit"><iconify-icon icon="lucide:file-search"></iconify-icon><span>Audit Log</span></a>
-      <a href="#sovereignty" class="nav-item" data-tab="sovereignty"><iconify-icon icon="lucide:shield-check"></iconify-icon><span>Security &amp; Sovereignty</span></a>
+      <a href="#sovereignty" class="nav-item" data-tab="sovereignty"><iconify-icon icon="lucide:shield-check"></iconify-icon><span>Security &amp; Isolation</span></a>
       <div class="sidebar-section-label">Infrastructure</div>
       <a href="#resources" class="nav-item" data-tab="resources"><iconify-icon icon="lucide:cpu"></iconify-icon><span>System Resources</span></a>
     </nav>
@@ -278,9 +278,9 @@
           <p style="font-size:11.5px;color:var(--text-muted);max-width:600px">Reflects the fixed hardware-scaling decisions in MASTER_BUILD_GUIDE.md Part 1 — a deliberate, honest constraint of the demo hardware, not a live resource monitor. Live GPU/CPU telemetry isn't currently exposed by the backend.</p>
         </section>
 
-        <!-- Security & Sovereignty -->
+        <!-- Security & Isolation -->
         <section id="tab-sovereignty" style="flex-direction:column;gap:20px">
-          <span class="section-label">Architecture &amp; Data Sovereignty</span>
+          <span class="section-label">Architecture &amp; Data Isolation</span>
           <div class="panel panel-pad" style="overflow-x:auto">
             <div class="arch-diagram">
               <div class="arch-node">
@@ -291,7 +291,7 @@
               <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
               <div class="arch-node">
                 <div class="zone lan">Port 8000 · Only door in</div>
-                <div class="name">Sovereign Workbench (single process)</div>
+                <div class="name">ERSA Workbench (single process)</div>
                 <div class="desc">API, agent loop, router, tools &amp; file generation — one app, one port.</div>
               </div>
               <div class="arch-connector"><iconify-icon icon="lucide:arrow-right"></iconify-icon></div>
@@ -404,12 +404,23 @@
             </div>
           </div>
 
-          <span class="section-label">Per-Task Network Status</span>
-          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:640px">Application-level correlation only: the monitor is sampled at a task's start and end and tagged with its <span class="mono">task_id</span> &mdash; concurrent tasks each keep their own record. Paste a <span class="mono">task_id</span> from the Task Activity tab.</p>
+          <span class="section-label">Per-Task Network Status &mdash; Live</span>
+          <p style="font-size:11.5px;color:var(--text-muted);margin:-6px 0 0;max-width:640px">Application-level correlation: the network monitor is sampled at each task's start and end and tagged with its <span class="mono">task_id</span> &mdash; concurrent tasks each keep their own record. The most recent tasks appear here <strong>automatically</strong> (this page re-checks every 5&nbsp;s), so a task submitted in the User Workbench shows its isolation verdict here within seconds. No task IDs are claimed to travel on packets.</p>
           <div class="panel panel-pad" style="display:flex;flex-direction:column;gap:12px">
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <div style="overflow-x:auto">
+              <table class="data-table" style="font-size:11.5px;min-width:640px">
+                <thead><tr><th>Task ID</th><th>User</th><th>Type</th><th>Verdict</th><th class="num">Ext. conns</th><th class="num">Sampled</th></tr></thead>
+                <tbody id="netmon-recent-tbody"></tbody>
+              </table>
+            </div>
+            <div class="table-empty" id="netmon-recent-empty" hidden>
+              <iconify-icon icon="lucide:radar"></iconify-icon>
+              <span>No tasks recorded yet &mdash; submit one in the User Workbench and it will appear here.</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--border-subtle);padding-top:10px">
+              <span style="font-size:11px;color:var(--text-muted)">Look up any task by ID:</span>
               <input type="text" id="netmon-task-input" placeholder="task_id" autocomplete="off"
-                style="flex:1;min-width:220px;padding:8px 10px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--elevated-surface);color:var(--text-primary);font-family:'JetBrains Mono',monospace;font-size:12px">
+                style="flex:1;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--elevated-surface);color:var(--text-primary);font-family:'JetBrains Mono',monospace;font-size:12px">
               <button class="export-btn" id="netmon-task-check" style="padding:6px 14px"><iconify-icon icon="lucide:search"></iconify-icon>Check task</button>
             </div>
             <div id="netmon-task-result" style="font-size:12px"></div>
@@ -497,7 +508,7 @@
   </div>
 </template>
 
-<script src="app.js?v=20260919"></script>
+<script src="app.js?v=20260920"></script>
 <script>
   AdminAuth.guard(); // redirects to admin-login.html immediately if no active admin session
   document.getElementById('admin-logout').addEventListener('click', (e) => {
@@ -509,6 +520,6 @@
   const tpl = document.getElementById('audit-table-template');
   document.getElementById('audit-table-panel').appendChild(tpl.content.cloneNode(true));
 </script>
-<script src="admin.js?v=20260919"></script>
+<script src="admin.js?v=20260920"></script>
 </body>
 </html>

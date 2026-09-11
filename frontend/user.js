@@ -1825,7 +1825,7 @@ function wireCopyButtons() {
 /** Text-to-speech for assistant answers — reads the exact plain-text
  *  answer shown in the chat aloud, via the browser's built-in Web Speech
  *  API (window.speechSynthesis). Fully local to the browser, no network
- *  call — consistent with the air-gapped/sovereign story. Only one
+ *  call — consistent with the air-gapped/offline story. Only one
  *  utterance plays at a time: starting a new one, or re-clicking the same
  *  button, stops whatever was already speaking. */
 let currentUtteranceBtn = null;
