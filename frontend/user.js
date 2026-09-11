@@ -238,6 +238,7 @@ function renderConversation() {
   wireCopyButtons();
   wireSpeakButtons();
   wirePreviewButtons();
+  wireGraphButtons();
   startWorkingTicker();
   const scroller = document.getElementById('conversation-scroll');
   if (scroller) scroller.scrollTop = scroller.scrollHeight;
@@ -378,6 +379,7 @@ function taskMetaRow(task) {
       ${modelsUsedList(task).length ? `<span class="task-meta-item mono" title="Model(s) used, in call order"><iconify-icon icon="lucide:cpu" style="font-size:11px"></iconify-icon>${escapeHtml(modelsUsedList(task).join(' → '))}</span>` : ''}
       <span class="task-meta-item mono" title="Duration"><iconify-icon icon="lucide:timer" style="font-size:11px"></iconify-icon>${duration}</span>
       <span class="task-meta-item mono ${hasTokens ? '' : 'task-meta-gap'}" title="${hasTokens ? 'Real token usage reported by Ollama for this task' : 'Not available for this task'}"><iconify-icon icon="lucide:coins" style="font-size:11px"></iconify-icon>${escapeHtml(tokensLabel)}</span>
+      <button class="task-meta-item view-graph-btn" data-view-graph="${escapeHtml(task.task_id)}" title="View this task's activity map"><iconify-icon icon="lucide:workflow" style="font-size:11px"></iconify-icon>Activity map</button>
     </div>
     ${thinkingStepsHtml(task)}`;
 }
@@ -577,7 +579,11 @@ function tick() {
   if (!currentTask) return;
   const state = computeGraphState(currentTask, Date.now());
   renderLiveStrip(state);
-  if (graphOpen) renderGraph(state);
+  // Only auto-refresh the maximized graph while it's showing the LIVE
+  // task — if the user opened a past message's activity map (see
+  // openGraph(task) / wireGraphButtons), live polling must never
+  // overwrite that historical view with the in-flight task's state.
+  if (graphOpen && viewedGraphTask === currentTask) renderGraph(state);
 }
 
 function activeAssistantTurn() {
@@ -915,9 +921,16 @@ function fileToBase64(file) {
    Maximized execution graph
    ============================================================ */
 let graphOpen = false;
+// Which task the maximized graph is currently showing — the live
+// currentTask when opened from the header button (default), or a PAST
+// message's own task object when opened via that message's "Activity map"
+// button (see taskMetaRow / wireGraphButtons). Kept separate from
+// currentTask so viewing an old task's graph is never silently replaced
+// by live polling for whatever task is actually in flight (see tick()).
+let viewedGraphTask = null;
 
 const NODE_META = {
-  task: { icon: 'lucide:file-input', label: 'Task', title: () => truncate(currentTask ? currentTask.prompt : '', 26) },
+  task: { icon: 'lucide:file-input', label: 'Task', title: () => truncate(viewedGraphTask ? viewedGraphTask.prompt : '', 26) },
   classification: { icon: 'lucide:tags', label: 'Classification', title: () => 'Task Type Detection' },
   routing: { icon: 'lucide:route', label: 'Routing', title: () => 'Model & Compute Logic' },
   tool: { icon: 'lucide:cpu', label: 'Knowledge / Tool', title: () => 'Tool & Knowledge Activity' },
@@ -925,16 +938,21 @@ const NODE_META = {
   deliverable: { icon: 'lucide:package-check', label: 'Result', title: () => 'Deliverable' },
 };
 
-function openGraph() {
+/** Opens the maximized activity map. With no argument, shows the live/
+ *  in-flight task (the header button's existing behavior, unchanged). Pass
+ *  a specific task object (see findTurnAndPromptByTaskId) to view a PAST,
+ *  already-completed message's own activity map instead. */
+function openGraph(task) {
   graphOpen = true;
+  viewedGraphTask = task || currentTask;
   document.getElementById('graph-overlay').classList.add('open');
   const subtitle = document.getElementById('graph-subtitle');
   const footerTask = document.getElementById('graph-footer-task');
-  if (currentTask) {
-    const tid = currentTask.task_id || 'pending';
-    subtitle.textContent = `TASK-${tid.slice(0, 8).toUpperCase()}${currentTask.demo ? ' · DEMO' : ''}`;
+  if (viewedGraphTask) {
+    const tid = viewedGraphTask.task_id || 'pending';
+    subtitle.textContent = `TASK-${tid.slice(0, 8).toUpperCase()}${viewedGraphTask.demo ? ' · DEMO' : ''}`;
     footerTask.textContent = `TASK: ${tid.slice(0, 12).toUpperCase()}`;
-    renderGraph(computeGraphState(currentTask, Date.now()));
+    renderGraph(computeGraphState(viewedGraphTask, Date.now()));
   } else {
     subtitle.textContent = 'No active task';
     footerTask.textContent = 'TASK: —';
@@ -1114,7 +1132,7 @@ function outputSummary(t) {
  * A row whose value is null/'' renders as a muted "Not available".
  */
 function buildNodePopover(nodeKey, state) {
-  const t = currentTask || {};
+  const t = viewedGraphTask || {};
   const r = t.result || {};
   const rows = [];
   const actions = [];
@@ -1776,6 +1794,37 @@ async function copyToClipboard(text) {
 }
 
 /** Wire up every copy control currently in the conversation DOM. */
+/** Finds the assistant turn with this task_id in the CURRENT chat's message
+ *  list and pairs it with the prompt text from the user message right
+ *  before it (assistant turns don't carry their own prompt — see
+ *  handleMessage), so openGraph(task) has everything NODE_META.task's
+ *  title needs. Returns null if the task isn't in this chat's history
+ *  (shouldn't happen — the button is only ever rendered from that same
+ *  list — but defensive since it's reached via a DOM data attribute). */
+function findTurnAndPromptByTaskId(taskId) {
+  const idx = chatMessages.findIndex((m) => m.role === 'assistant' && m.task_id === taskId);
+  if (idx === -1) return null;
+  let prompt = '';
+  for (let i = idx - 1; i >= 0; i--) {
+    if (chatMessages[i].role === 'user') { prompt = chatMessages[i].prompt || ''; break; }
+  }
+  return { ...chatMessages[idx], prompt };
+}
+
+/** Wires every per-message "Activity map" button (see taskMetaRow) to open
+ *  the maximized execution graph for THAT specific task, past or present —
+ *  not just whatever is currently in flight. */
+function wireGraphButtons() {
+  document.querySelectorAll('[data-view-graph]').forEach((btn) => {
+    if (btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', () => {
+      const task = findTurnAndPromptByTaskId(btn.dataset.viewGraph);
+      if (task) openGraph(task);
+    });
+  });
+}
+
 function wireCopyButtons() {
   document.querySelectorAll('.copy-answer-btn, .mini-copy').forEach((btn) => {
     if (btn._wired) return;
