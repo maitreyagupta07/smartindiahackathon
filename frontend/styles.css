@@ -144,17 +144,6 @@ input, select { font-family: inherit; }
 .icon-btn:hover { background: var(--hover-surface); color: var(--text-primary); }
 .topbar-right { display: flex; align-items: center; gap: 6px; }
 
-/* ---- Disco mode toggle — cycles the existing gradient-picker hues like a
-   disco light (GradientPicker.apply(), same CSS vars/colors, just spun
-   through fast instead of picked once) while spinning and rainbow-cycling
-   its own small icon for the same effect in miniature. ---- */
-.disco-toggle.spinning { color: var(--accent); }
-.disco-toggle.spinning iconify-icon {
-  display: block; animation: disco-spin 1.1s linear infinite, disco-hue 1.6s linear infinite;
-}
-@keyframes disco-spin { to { transform: rotate(360deg); } }
-@keyframes disco-hue { to { filter: hue-rotate(360deg); } }
-
 /* ---- Conversation ----
    Bottom padding must clear the ABSOLUTELY POSITIONED composer-dock
    (template chip row + file preview + composer bar + disclaimer all stack

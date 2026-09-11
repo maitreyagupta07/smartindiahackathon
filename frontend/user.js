@@ -1633,49 +1633,6 @@ const GradientPicker = {
   },
 };
 
-/**
- * Disco mode — a small toggle next to the theme switch that spins the same
- * atmospheric wash GradientPicker already offers as fixed presets through
- * every hue in a fast, continuous loop instead of picking just one. Purely
- * decorative; reuses GradientPicker.apply() itself (same CSS vars, same
- * light/dark-aware color math) rather than a parallel implementation, so
- * it can never drift out of sync with what the swatches actually produce.
- * Toggling off restores whatever gradient the user had actually chosen.
- */
-const DiscoMode = {
-  active: false,
-  timer: null,
-  hue: 0,
-  STEP_DEG: 14,
-  INTERVAL_MS: 90,
-
-  start() {
-    if (this.active) return;
-    this.active = true;
-    document.querySelectorAll('[data-disco-toggle]').forEach((b) => b.classList.add('spinning'));
-    this.timer = setInterval(() => {
-      this.hue = (this.hue + this.STEP_DEG) % 360;
-      GradientPicker.apply(this.hue);
-    }, this.INTERVAL_MS);
-  },
-  stop() {
-    if (!this.active) return;
-    this.active = false;
-    clearInterval(this.timer);
-    document.querySelectorAll('[data-disco-toggle]').forEach((b) => b.classList.remove('spinning'));
-    // Restore whatever gradient choice the user actually saved, rather
-    // than freezing on whatever hue disco mode happened to land on.
-    const stored = localStorage.getItem(GradientPicker.KEY);
-    GradientPicker.apply(stored === null ? null : Number(stored));
-  },
-  toggle() { this.active ? this.stop() : this.start(); },
-  init() {
-    document.querySelectorAll('[data-disco-toggle]').forEach((btn) => {
-      btn.addEventListener('click', () => this.toggle());
-    });
-  },
-};
-
 /* ---------- Helpers ---------- */
 function truncate(str, n) { return !str ? '' : str.length > n ? str.slice(0, n - 1) + '…' : str; }
 function escapeHtml(str) {
@@ -2349,7 +2306,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderConversation();
   renderTaskSidebar();
   GradientPicker.init();
-  DiscoMode.init();
   initNotifications();
   TemplateLibrary.init();
   PreviewPanel.init();
