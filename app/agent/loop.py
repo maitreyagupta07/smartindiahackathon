@@ -31,6 +31,7 @@ from .planner import (
     FILEGEN_CONTENT_MARKER,
     strip_markdown_emphasis,
     SUPPORTED_WORKFLOW_STAGES,
+    render_file_content_as_text,
 )
 from ..inference.client import call_inference
 from ..tools.facade import execute_code, search_docs, generate_file, scan_document, generate_image, forecast_timeseries
@@ -383,9 +384,24 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
             # of Y..." now produces more than one) rather than reading
             # last_step.observation directly, which is only ever the LAST
             # generate_file call's own single result.
+            # Alongside the file itself, also render the SAME prepared
+            # content (state.prepared_file_content — the structured
+            # {"title","sections"} generate_file already wrote to disk) as
+            # plain text, so a document-generation response can show the
+            # reader a summary/findings without opening the file — "first
+            # give me a summary, then the doc, in one response" — instead
+            # of a file-type result always carrying no text at all. None
+            # for a pure image-generation result, or a multi-deliverable
+            # request (state.prepared_file_content only ever reflects the
+            # LAST deliverable prepared, so summarizing just one of several
+            # would be misleading) — the file(s) alone are the response
+            # then, exactly as before this existed.
+            summary_text = None
+            if len(state.generated_files) <= 1:
+                summary_text = render_file_content_as_text(state.prepared_file_content)
             print(
                 f"[LOOP] task_id={state.task_id} END status=completed "
-                f"result_type=file files={state.generated_files}"
+                f"result_type=file files={state.generated_files} has_summary_text={summary_text is not None}"
             )
             return ExecuteTaskResponse(
                 status="completed",
@@ -393,7 +409,7 @@ async def run_agent_loop(req: ExecuteTaskRequest) -> ExecuteTaskResponse:
                 task_type=state.task_type,
                 result=TaskResult(
                     type="file",
-                    text=None,
+                    text=summary_text,
                     file_url=state.file_url,
                     file_name=state.file_name,
                     files=state.generated_files or None,

@@ -815,6 +815,35 @@ def strip_markdown_emphasis(text: str) -> str:
     return re.sub(r"(?m)^#{1,6}[ \t]+", "", text)
 
 
+def render_file_content_as_text(content: Optional[dict]) -> Optional[str]:
+    """
+    Renders the same {"title", "sections":[{"heading","body"},...]} shape
+    generate_file writes into a docx/xlsx/pptx from (see
+    state.prepared_file_content) as a plain-text summary, so a
+    document-generation response can show the reader what the file
+    actually says without opening it — "first give me a summary, then the
+    doc, in one response" — instead of a file-type result carrying no text
+    at all. Purely a text rendering of content that was already produced;
+    does not call a model or change what generate_file itself writes.
+    Returns None for anything that isn't a valid {"title","sections"} dict
+    (e.g. no content was prepared for this task, such as a pure
+    generate_image result) — callers leave the response's `text` field
+    unset in that case, exactly as before this existed.
+    """
+    if not _is_valid_file_content(content):
+        return None
+    lines = [content["title"], ""]
+    for section in content["sections"]:
+        heading = (section.get("heading") or "").strip()
+        body = (section.get("body") or "").strip()
+        if heading:
+            lines.append(f"{heading}:")
+        if body:
+            lines.append(body)
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def _approval_note_text_to_file_content(raw_text: str) -> dict:
     """
     Converts the LoRA adapter's own trained free-text approval-note format
